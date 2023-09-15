@@ -13,10 +13,12 @@ It gathers:
 First define $YOUR_OUTPUT_DIR, your output folder.
 Grab a logging node at NERSC.
 
-### SUPRIME
+### ODIN
 desi_hiz_merge --outfn $YOUR_OUTPUT_DIR/desi-odin.fits --img odin --numproc 32
+
 desi_hiz_merge --outfn $YOUR_OUTPUT_DIR/desi-odin-stdsky.fits --img odin --numproc 32
 
 ### SUPRIME
 desi_hiz_merge --outfn $YOUR_OUTPUT_DIR/desi-suprime.fits --img suprime --numproc 32
+
 desi_hiz_merge --outfn $YOUR_OUTPUT_DIR/desi-suprime-stdsky.fits --img suprime --numproc 32
