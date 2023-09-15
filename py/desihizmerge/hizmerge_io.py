@@ -882,7 +882,7 @@ def create_coadd_merge(cofn, tids, stdsky):
 
 
 # FIBERMAP columns to remove
-def get_tractor_cols2rmv():
+def get_fm_tractor_cols2rmv():
     """
     Get the list of tractor columns we remove downstream
 
@@ -1486,7 +1486,7 @@ def get_spec_d(img, case, stack_s, mydict):
     d["CASE"] = case
 
     # remove dr9-like columns, which are dummy for laes
-    rmvcols = get_tractor_cols2rmv()
+    rmvcols = get_fm_tractor_cols2rmv()
     log.info("remove from FIBERMAP: {}".format(rmvcols))
     d.remove_columns(rmvcols)
 
