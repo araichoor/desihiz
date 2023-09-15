@@ -15,7 +15,7 @@ from desihizmerge.hizmerge_io import (
     get_coaddfns,
     create_coadd_merge,
     spectra_stack,
-    get_spec_d,
+    get_spec_table,
     get_phot_table,
     get_expids,
     merge_cases,
@@ -121,7 +121,7 @@ def main():
         stack_ss[case] = spectra_stack(ss)
 
         # specinfo table
-        spec_ds[case] = get_spec_d(args.img, case, stack_ss[case], mydicts[case])
+        spec_ds[case] = get_spec_table(args.img, case, stack_ss[case], mydicts[case])
         all_cofns = []
         for cofn, s in zip(cofns, ss):
             all_cofns += [cofn for _ in s.fibermap]

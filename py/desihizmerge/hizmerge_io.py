@@ -1226,7 +1226,7 @@ def get_phot_table(img, case, specinfo_table, photdir):
     Args:
         img: element from allowed_imgs (str)
         case: round of DESI observation (str)
-        specinfo_table: output of the get_spec_d() function
+        specinfo_table: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
 
@@ -1452,7 +1452,7 @@ def get_phot_table(img, case, specinfo_table, photdir):
     return d
 
 
-def get_spec_d(img, case, stack_s, mydict):
+def get_spec_table(img, case, stack_s, mydict):
     """
     Get the "enhanced" FIBERMAP table
 
@@ -1598,7 +1598,7 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, exps_ds):
     Args:
         img: element from allowed_imgs (str)
         stack_ss: list of NCASE Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
-        spec_ds: list of NCASE specinfo tables from get_spec_d() (list of arrays)
+        spec_ds: list of NCASE specinfo tables from get_spec_table() (list of arrays)
         phot_ds: list of NCASE photinfo tables from get_phot_table() (list of arrays)
         exp_ds: list of NCASE exps tables from get_expids() (list of arrays)
 
@@ -1657,7 +1657,7 @@ def build_hs(
         cases: list of round of DESI observations (list of str)
         stdsky: are we dealing with standard stars (STD) + sky (SKY)? (boolean)
         stack_s: Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
-        spec_d: specinfo table from get_spec_d() (list of arrays)
+        spec_d: specinfo table from get_spec_table() (list of arrays)
         phot_d: photinfo table from get_phot_table() (list of arrays)
         exp_d: exps table from get_expids() (list of arrays)
 

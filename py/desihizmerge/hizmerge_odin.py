@@ -235,7 +235,7 @@ def get_odin_phot_infos(case, d, photdir=None):
 
     Args:
         case: round of DESI observation (str)
-        d: output of the get_spec_d() function
+        d: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
     """
