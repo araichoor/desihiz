@@ -338,7 +338,7 @@ def get_vi_fns(img):
         mydir = os.path.join(
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "odin", "vi"
         )
-        fns = [os.path.join(mydir, "FINAL_VI_ODIN_N501.fits")]
+        fns = [os.path.join(mydir, "FINAL_VI_ODIN_N501_v20230913.fits")]
         tidkey, zkey, qualkey = "VI_TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL"
 
     if img == "suprime":
@@ -346,7 +346,7 @@ def get_vi_fns(img):
         mydir = os.path.join(
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "suprime", "vi"
         )
-        fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS.fits.gz")]
+        fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz")]
         tidkey, zkey, qualkey = "TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL"
 
     return fns, tidkey, zkey, qualkey
@@ -1535,7 +1535,7 @@ def get_spec_d(img, case, stack_s, mydict):
     # add vi
     d["VI"] = np.zeros(len(d), dtype=bool)
     d["VI_Z"] = np.nan + np.zeros(len(d), dtype=">f4")
-    d["VI_QUALITY"] = -99 + np.zeros(len(d), dtype=">i4")
+    d["VI_QUALITY"] = np.nan + np.zeros(len(d), dtype=">f4")
     only_stdsky = ((d["STD"]) | (d["SKY"])).sum() == len(d)
 
     if only_stdsky:
