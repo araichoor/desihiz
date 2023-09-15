@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+
+
+import os
+import numpy as np
+from astropy.table import Table, vstack
+from desiutil.log import get_logger
+from desiutil.redirect import stdouterr_redirected
+from desihizmerge.hizmerge_io import (
+    print_config_infos,
+    allowed_imgs,
+    get_img_cases,
+    get_img_bands,
+    get_img_infos,
+    get_coaddfns,
+    create_coadd_merge,
+    spectra_stack,
+    get_spec_d,
+    get_phot_table,
+    get_expids,
+    merge_cases,
+    build_hs,
+    print_infos,
+)
+import multiprocessing
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outfn",
+        help="output fits filename (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--img",
+        choices=allowed_imgs,
+        type=str,
+        default="odin",
+    )
+    parser.add_argument(
+        "--stdsky",
+        help="process (only) the STD+SKY targets; otherwise the LAE targets are processed",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--numproc",
+        help="number of concurrent processes to use; set to 0 to not process (default=1)",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--log-stdout",
+        "--log_stdout",
+        action="store_true",
+        help="log to stdout instead of redirecting to a file",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    print_config_infos()
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    #
+    cases = get_img_cases(args.img)
+    bands = get_img_bands(args.img)
+    photdir = os.path.join(
+        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", args.img, "phot"
+    )
+
+    log.info("")
+    log.info("outfn\t= {}".format(args.outfn))
+    log.info("cases\t= {}".format(cases))
+    log.info("bands\t= {}".format(bands))
+    log.info("photdir\t= {}".format(photdir))
+    log.info("")
+
+    mydicts = {}
+    stack_ss = {}
+    spec_ds = {}
+    phot_ds = {}
+    exps_ds = {}
+
+    for case in cases:
+
+        # get the infos (TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION)
+        mydicts[case] = get_img_infos(args.img, case, args.stdsky)
+        # remark:
+        #   for odin cosmos_yr2, n419 and n501 have 6 duplicates...
+        #   hence the ~unique thing (and we want a list)
+        tids = []
+        for band in bands:
+            tids = list(set(tids + mydicts[case][band]["TARGETID"].tolist()))
+
+        # get the coadd file names
+        cofns = get_coaddfns(args.img, case)
+
+        # read + stack the spectra
+        myargs = [(cofn, tids, args.stdsky) for cofn in cofns]
+        pool = multiprocessing.Pool(processes=args.numproc)
+        with pool:
+            ss = pool.starmap(create_coadd_merge, myargs)
+        ss = [_ for _ in ss if _ is not None]
+        stack_ss[case] = spectra_stack(ss)
+
+        # specinfo table
+        spec_ds[case] = get_spec_d(args.img, case, stack_ss[case], mydicts[case])
+        all_cofns = []
+        for cofn, s in zip(cofns, ss):
+            all_cofns += [cofn for _ in s.fibermap]
+        spec_ds[case]["COADDFN"] = all_cofns
+
+        # photinfo table
+        if args.stdsky:
+            phot_ds[case] = None
+        else:
+            phot_ds[case] = get_phot_table(
+                args.img, case, spec_ds[case], photdir=photdir
+            )
+
+        # expids table
+        exps_ds[case] = get_expids(args.img, case)
+
+        # remove PHOT_RA, PHOT_DEC from spec_d
+        #   as they are now recorded in the phot_d table
+        spec_ds[case].remove_columns(["PHOT_RA", "PHOT_DEC"])
+
+    # now merge the cases
+    stack_s, spec_d, phot_d, exps_d = merge_cases(
+        args.img, stack_ss, spec_ds, phot_ds, exps_ds
+    )
+
+    # build hs
+    hs = build_hs(args.img, cases, args.stdsky, stack_s, spec_d, phot_d, exps_d)
+
+    # write
+    log.info("write {}".format(args.outfn))
+    hs.writeto(args.outfn, overwrite=args.overwrite)
+
+    # print info
+    print_infos(args.img, args.outfn)
+
+
+if __name__ == "__main__":
+
+    args = parse()
+
+    assert args.outfn.split(os.path.extsep)[-1] == "fits"
+
+    outlog = args.outfn.replace(".fits", ".log")
+
+    if (os.path.isfile(args.outfn)) & (~args.overwrite):
+
+        msg = "{} exists and args.overwrite=False".format(args.outfn)
+        log.error(msg)
+        raise ValueError(msg)
+
+    if args.log_stdout:
+
+        main()
+
+    else:
+
+        with stdouterr_redirected(to=outlog):
+
+            main()
