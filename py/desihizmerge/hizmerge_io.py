@@ -56,8 +56,16 @@ def print_config_infos():
     # desispec, desihizmerge code version/path
     for name in ["desispec", "desihizmerge"]:
         exec("import {}".format(name))
-        log.info("running with {} code version: {}".format(name, eval("{}.__version__".format(name))))
-        log.info("running with {} code path: {}".format(name, eval("{}.__path__".format(name))))
+        log.info(
+            "running with {} code version: {}".format(
+                name, eval("{}.__version__".format(name))
+            )
+        )
+        log.info(
+            "running with {} code path: {}".format(
+                name, eval("{}.__path__".format(name))
+            )
+        )
 
     #
     log.info("spec_rootdir: {}".format(get_spec_rootdir()))
@@ -1677,7 +1685,11 @@ def build_hs(
     # header
     h = fits.PrimaryHDU()
     # get the date (from the machine) and dump that
-    date_str = subprocess.check_output("date +%Y-%m-%dT%H:%M:%S%:z", shell=True).decode("utf-8").split("\n")[0]
+    date_str = (
+        subprocess.check_output("date +%Y-%m-%dT%H:%M:%S%:z", shell=True)
+        .decode("utf-8")
+        .split("\n")[0]
+    )
     yyyymmdd = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S%z").strftime("%Y%m%d")
     version = "v{}".format(yyyymmdd)
     h.header["CREADATE"] = date_str
@@ -1751,7 +1763,9 @@ def build_hs(
                 )
             )
             # zphot fn: use str() to protect against None
-            h.header["ZC20FNS"] = ",".join([str(get_cosmos2020_fn(case)) for case in cases])
+            h.header["ZC20FNS"] = ",".join(
+                [str(get_cosmos2020_fn(case)) for case in cases]
+            )
             h.header["ZCLAFNS"] = ",".join([str(get_clauds_fn(case)) for case in cases])
             h.header["EXTCOEFF"] = repr(exts).replace("'", '"')
 
