@@ -2,6 +2,7 @@
 
 
 import os
+import subprocess
 from glob import glob
 from datetime import datetime
 import fitsio
@@ -1675,7 +1676,15 @@ def build_hs(
 
     # header
     h = fits.PrimaryHDU()
-    h.header["SPECDIR"] = ",".join([get_specdir(img, case) for case in cases])
+    # get the date (from the machine) and dump that
+    date_str = subprocess.check_output("date +%Y-%m-%dT%H:%M:%S%:z", shell=True).decode("utf-8").split("\n")[0]
+    yyyymmdd = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S%z").strftime("%Y%m%d")
+    version = "v{}".format(yyyymmdd)
+    h.header["CREADATE"] = date_str
+    h.header["VERSION"] = version
+    log.info("Storing in the PRIMARY header:")
+    for key in ["CREADATE", "VERSION"]:
+        log.info("\t{} = {}".format(key, h.header[key]))
     hs.append(h)
 
     # images
@@ -1715,7 +1724,22 @@ def build_hs(
         h = fits.convenience.table_to_hdu(d)
         h.header["EXTNAME"] = extname
 
-        # ext. coeffs (a bit hacky...)
+        # SPECINFO: cases, specdirs, vi fns
+        if extname == "SPECINFO":
+
+            h.header.append(
+                fits.Card(
+                    "LONGSTRN",
+                    "OGIP 1.0",
+                    "The OGIP Long String Convention may be used.",
+                )
+            )
+            h.header["CASES"] = ",".join(cases)
+            h.header["SPECDIRS"] = ",".join([get_specdir(img, case) for case in cases])
+            fns, _, _, _ = get_vi_fns(img)
+            h.header["VIFNS"] = ",".join(fns)
+
+        # PHOTINFO: cases, ext. coeffs (a bit hacky...), zphot fns
         if extname == "PHOTINFO":
 
             exts = get_ext_coeffs(img)
@@ -1726,6 +1750,9 @@ def build_hs(
                     "The OGIP Long String Convention may be used.",
                 )
             )
+            # zphot fn: use str() to protect against None
+            h.header["ZC20FNS"] = ",".join([str(get_cosmos2020_fn(case)) for case in cases])
+            h.header["ZCLAFNS"] = ",".join([str(get_clauds_fn(case)) for case in cases])
             h.header["EXTCOEFF"] = repr(exts).replace("'", '"')
 
         hs.append(h)
