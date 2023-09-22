@@ -45,6 +45,12 @@ def parse():
         default="odin",
     )
     parser.add_argument(
+        "--cases",
+        help="comma-separated list of DESI rounds of observation (optional)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
         "--stdsky",
         help="process (only) the STD+SKY targets; otherwise the LAE targets are processed",
         action="store_true",
@@ -68,6 +74,12 @@ def parse():
     )
     args = parser.parse_args()
 
+    cases = get_img_cases(args.img)
+    if args.cases is None:
+        args.cases = cases
+    else:
+        args.cases = args.cases.split(",")
+        assert np.all(np.in1d(args.cases, cases))
     for kwargs in args._get_kwargs():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
     return args
@@ -80,7 +92,6 @@ def main():
     for kwargs in args._get_kwargs():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
 
-    cases = get_img_cases(args.img)
     bands = get_img_bands(args.img)
     photdir = os.path.join(
         os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", args.img, "phot"
@@ -101,7 +112,7 @@ def main():
         phot_offset_ds = None
     exps_ds = {}
 
-    for case in cases:
+    for case in args.cases:
 
         # get the infos (TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION)
         # clauds-offset case:
@@ -159,7 +170,7 @@ def main():
     )
 
     # build hs
-    hs = build_hs(args.img, cases, args.stdsky, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
+    hs = build_hs(args.img, args.cases, args.stdsky, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
 
     # write
     log.info("write {}".format(args.outfn))
