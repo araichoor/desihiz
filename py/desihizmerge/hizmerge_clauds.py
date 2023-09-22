@@ -204,6 +204,19 @@ def get_clauds_cosmos_yr2_lbgnew_u_or_us_tids():
         # read phot. catalog + cut on the ugr or uSgr targets
         pfn = get_clauds_fn("cosmos_yr2", offset=True, uband=uband)
         p = fitsio.read(pfn)
+        # mimick what was done for clauds-sext-cosmos-{u,uS}gr-r25.fits
+        sel = p["MASK"] == 0
+        sel &= p["ST_TRAIL"] == 0
+        if uband == "u":
+            sel &= p["FLAG_FIELD_BINARY"][:, 1]
+        elif uband == "uS":
+            sel &= p["FLAG_FIELD_BINARY"][:, 2]
+        sel &= p["FLAG_FIELD_BINARY"][:, 0]
+        for band in [uband, "g", "r"]:
+            sel &= (p[band] > 0) & (p[band] < 40)
+            sel &= (p["{}_err".format(band)] > 0) & (p["{}_err".format(band)] < 100)
+        p = p[sel]
+        #
         ugs, grs = p[uband] - p["g"], p["g"] - p["r"]
         if uband == "u":
             sel = (ugs > 0.3) & ((ugs > 2.2 * grs + 0.32) | (ugs > 1.6 * grs + 0.75))
@@ -384,7 +397,7 @@ def get_clauds_phot_infos(case, d, photdir=None, offset=None):
 
     # initialize columns we will fill
     claudsids = np.zeros(len(d), dtype=int)
-    targfns = np.zeros(len(d), dtype="S100")
+    targfns = np.zeros(len(d), dtype="S150")
 
     # now get the per-band phot. infos
     bands = get_img_bands("clauds")
@@ -537,8 +550,6 @@ def get_clauds_phot_infos(case, d, photdir=None, offset=None):
                         case, band, sel_diff.sum(), d2d.size
                     )
                 )
-
-            # ===
 
             # fill the values
             iid = ii_band[iid]

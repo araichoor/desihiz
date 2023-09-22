@@ -39,6 +39,7 @@ def parse():
     )
     parser.add_argument(
         "--img",
+        help="imaging used for target selection",
         choices=allowed_imgs,
         type=str,
         default="odin",
@@ -66,6 +67,7 @@ def parse():
         action="store_true",
     )
     args = parser.parse_args()
+
     for kwargs in args._get_kwargs():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
     return args
@@ -78,7 +80,6 @@ def main():
     for kwargs in args._get_kwargs():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
 
-    #
     cases = get_img_cases(args.img)
     bands = get_img_bands(args.img)
     photdir = os.path.join(
@@ -86,8 +87,6 @@ def main():
     )
 
     log.info("")
-    log.info("outfn\t= {}".format(args.outfn))
-    log.info("cases\t= {}".format(cases))
     log.info("bands\t= {}".format(bands))
     log.info("photdir\t= {}".format(photdir))
     log.info("")
@@ -96,11 +95,19 @@ def main():
     stack_ss = {}
     spec_ds = {}
     phot_ds = {}
+    if args.img == "clauds":
+        phot_offset_ds = {}
+    else:
+        phot_offset_ds = None
     exps_ds = {}
 
     for case in cases:
 
         # get the infos (TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION)
+        # clauds-offset case:
+        #   as the "official" and offset catalogs are row-matched
+        #   there is no need to distinguish for the get_img_infos()
+        #   which does not know about the photometry
         mydicts[case] = get_img_infos(args.img, case, args.stdsky)
         # remark:
         #   for odin cosmos_yr2, n419 and n501 have 6 duplicates...
@@ -134,6 +141,10 @@ def main():
             phot_ds[case] = get_phot_table(
                 args.img, case, spec_ds[case], photdir=photdir
             )
+            if args.img == "clauds":
+                phot_offset_ds[case] = get_phot_table(
+                    args.img, case, spec_ds[case], photdir=photdir, offset=True
+                )
 
         # expids table
         exps_ds[case] = get_expids(args.img, case)
@@ -143,12 +154,12 @@ def main():
         spec_ds[case].remove_columns(["PHOT_RA", "PHOT_DEC"])
 
     # now merge the cases
-    stack_s, spec_d, phot_d, exps_d = merge_cases(
-        args.img, stack_ss, spec_ds, phot_ds, exps_ds
+    stack_s, spec_d, phot_d, phot_offset_d, exps_d = merge_cases(
+        args.img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds
     )
 
     # build hs
-    hs = build_hs(args.img, cases, args.stdsky, stack_s, spec_d, phot_d, exps_d)
+    hs = build_hs(args.img, cases, args.stdsky, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
 
     # write
     log.info("write {}".format(args.outfn))
