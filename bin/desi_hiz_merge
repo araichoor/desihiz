@@ -105,8 +105,11 @@ def main():
     mydicts = {}
     stack_ss = {}
     spec_ds = {}
-    phot_ds = {}
-    if args.img == "clauds":
+    if args.stdsky:
+        phot_ds = None
+    else:
+        phot_ds = {}
+    if (args.img == "clauds") & (not args.stdsky):
         phot_offset_ds = {}
     else:
         phot_offset_ds = None
@@ -146,9 +149,7 @@ def main():
         spec_ds[case]["COADDFN"] = all_cofns
 
         # photinfo table
-        if args.stdsky:
-            phot_ds[case] = None
-        else:
+        if not args.stdsky:
             phot_ds[case] = get_phot_table(
                 args.img, case, spec_ds[case], photdir=photdir
             )
@@ -170,7 +171,7 @@ def main():
     )
 
     # build hs
-    hs = build_hs(args.img, args.cases, args.stdsky, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
+    hs = build_hs(args.img, args.cases, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
 
     # write
     log.info("write {}".format(args.outfn))

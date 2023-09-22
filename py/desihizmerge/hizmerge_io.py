@@ -1918,7 +1918,8 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
         img: element from allowed_imgs (str)
         stack_ss: list of NCASE Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
         spec_ds: list of NCASE specinfo tables from get_spec_table() (list of arrays)
-        phot_ds: list of NCASE photinfo tables from get_phot_table() (list of arrays)
+        phot_ds: list of NCASE photinfo tables from get_phot_table()
+            is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
         phot_offset_ds: same as phot_ds, but for phot. with offsets;
             is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_ds: list of NCASE exps tables from get_expids() (list of arrays)
@@ -1943,14 +1944,13 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
     spec_d = vstack([spec_ds[case] for case in cases])
 
     # phot_ds
-    assert np.all(cases == list(phot_ds.keys()))
-
-    if np.sum([phot_ds[case] is None for case in cases]) == len(phot_ds):
+    if phot_ds is None:
 
         phot_d = None
 
     else:
 
+        assert np.all(cases == list(phot_ds.keys()))
         phot_d = vstack([phot_ds[case] for case in cases])
 
     # phot_offset_ds
@@ -1982,7 +1982,6 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
 def build_hs(
     img,
     cases,
-    stdsky,
     stack_s,
     spec_d,
     phot_d,
@@ -1995,10 +1994,10 @@ def build_hs(
     Args:
         img: element from allowed_imgs (str)
         cases: list of round of DESI observations (list of str)
-        stdsky: are we dealing with standard stars (STD) + sky (SKY)? (boolean)
         stack_s: Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
         spec_d: specinfo table from get_spec_table() (list of arrays)
-        phot_d: photinfo table from get_phot_table() (list of arrays)
+        phot_d: photinfo table from get_phot_table()
+            is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
         phot_offset_d: as phot_d, but for phot. with offset; relevant only for clauds; otherwise
             is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_d: exps table from get_expids() (list of arrays)
@@ -2056,15 +2055,15 @@ def build_hs(
     # specinfo, photinfo, photoffinfo, expids
     ds, extnames = [spec_d], ["SPECINFO"]
 
-    if not stdsky:
+    if phot_d is not None:
 
         ds.append(phot_d)
         extnames.append("PHOTINFO")
 
-        if phot_offset_d is not None:
+    if phot_offset_d is not None:
 
-            ds.append(phot_offset_d)
-            extnames.append("PHOTOFFINFO")
+        ds.append(phot_offset_d)
+        extnames.append("PHOTOFFINFO")
 
     ds.append(exps_d)
     extnames.append("EXPIDS")
