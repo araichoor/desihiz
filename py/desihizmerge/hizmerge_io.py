@@ -145,10 +145,10 @@ def get_bb_img(fn):
         bb_img = "HSC"
 
     elif os.path.basename(fn) in [
-        "COSMOS_6bands-SExtractor-Lephare.fits",
-        "COSMOS_6bands-SExtractor-Lephare-offset.fits",
-        "XMMLSS_6bands-SExtractor-Lephare.fits",
-        "XMMLSS_6bands-SExtractor-Lephare-offset.fits",
+        "COSMOS_11bands-SExtractor-Lephare.fits",
+        "COSMOS_11bands-SExtractor-Lephare-offset.fits",
+        "XMMLSS_11bands-SExtractor-Lephare.fits",
+        "XMMLSS_11bands-SExtractor-Lephare-offset.fits",
     ]:
 
         bb_img = "CLAUDS"
@@ -390,7 +390,7 @@ def get_clauds_fn(case, offset=False, uband="u"):
         offset_str = ""
 
     fn = os.path.join(
-        claudsdir, "{}_6bands-SExtractor-Lephare{}.fits".format(field.upper(), offset_str)
+        claudsdir, "{}_11bands-SExtractor-Lephare{}.fits".format(field.upper(), offset_str)
     )
 
     return fn
@@ -710,7 +710,7 @@ def read_targfn(targfn):
     """
 
     # CLAUDS official catalogs cannot be read with Table(fitsio.read())..
-    if "6bands-SExtractor-Lephare" in os.path.basename(targfn):
+    if "11bands-SExtractor-Lephare" in os.path.basename(targfn):
         p = Table(fits.open(targfn)[1].data)
     else:
         p = Table(fitsio.read(targfn))
@@ -764,10 +764,10 @@ def read_targfn(targfn):
     # - convert FLAG_FIELD_BINARY into a bit-coded int,
     #       as it s a pain to handle a 7-element array downstream..
     if os.path.basename(targfn) in [
-        "COSMOS_6bands-SExtractor-Lephare.fits",
-        "COSMOS_6bands-SExtractor-Lephare-offset.fits",
-        "XMMLSS_6bands-SExtractor-Lephare.fits",
-        "XMMLSS_6bands-SExtractor-Lephare-offset.fits",
+        "COSMOS_11bands-SExtractor-Lephare.fits",
+        "COSMOS_11bands-SExtractor-Lephare-offset.fits",
+        "XMMLSS_11bands-SExtractor-Lephare.fits",
+        "XMMLSS_11bands-SExtractor-Lephare-offset.fits",
     ]:
 
         for key in p.colnames:
@@ -1387,7 +1387,7 @@ def get_phot_init_table(img, n):
     if img in ["clauds"]:
 
         # sextractor columns
-        # $DESI_ROOT/users/raichoor/laelbg/clauds/dr/COSMOS_6bands-SExtractor-Lephare.fits
+        # $DESI_ROOT/users/raichoor/laelbg/clauds/dr/COSMOS_11bands-SExtractor-Lephare.fits
         dtype += [
             ("ID", ">i8"),
             ("RA", ">f8"),
