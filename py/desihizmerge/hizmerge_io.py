@@ -29,10 +29,11 @@ from desiutil.log import get_logger
 log = get_logger()
 
 # allowed values
-allowed_imgs = ["odin", "suprime"]
+allowed_imgs = ["odin", "suprime", "clauds"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2"],
+    "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -80,6 +81,10 @@ def get_img_bands(img):
 
     Returns:
         list of bands
+
+    Notes:
+        For odin/suprime, it is the selection bands.
+        For clauds, it is the set of bands used for the selection.
     """
     assert img in allowed_imgs
 
@@ -90,6 +95,11 @@ def get_img_bands(img):
     if img == "suprime":
 
         bands = ["I427", "I464", "I484", "I505", "I527"]
+
+    if img == "clauds":
+
+        bands = ["UGR", "USGR", "GRI"]
+
     return bands
 
 
@@ -133,6 +143,15 @@ def get_bb_img(fn):
     ]:
 
         bb_img = "HSC"
+
+    elif os.path.basename(fn) in [
+        "COSMOS_11bands-SExtractor-Lephare.fits",
+        "COSMOS_11bands-SExtractor-Lephare-offset.fits",
+        "XMMLSS_11bands-SExtractor-Lephare.fits",
+        "XMMLSS_11bands-SExtractor-Lephare-offset.fits",
+    ]:
+
+        bb_img = "CLAUDS"
 
     else:
 
@@ -217,6 +236,20 @@ def get_specdir(img, case):
 
             casedir = "tertiary26-thru20230416-v2"
 
+    if img == "clauds":
+
+        if case == "cosmos_yr1":
+
+            casedir = "tileid80871-80872-thru20210512-v2"
+
+        if case == "xmmlss_yr2":
+
+            casedir = "tertiary15-thru20221216-v2"
+
+        if case == "cosmos_yr2":
+
+            casedir = "tertiary26-thru20230416-v2"
+
     specdir = os.path.join(spec_rootdir, specprod, "healpix", casedir)
 
     return specdir
@@ -240,6 +273,11 @@ def get_ext_coeffs(img):
         LS: https://www.legacysurvey.org/dr9/catalogs/#galactic-extinction-coefficients
         HSC: https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_wide.forced
         SUPRIME: /global/cfs/cdirs/desi/users/raichoor/laelbg/suprime/phot/Subaru_COSMOS_all.ipynb
+        CLAUDS:
+            u, uS: inferred
+            filter curves from http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse:
+            see email from Eddie from 03/24/2023
+            hsc: https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_dud_rev.forced
     """
     assert img in allowed_imgs
 
@@ -261,6 +299,15 @@ def get_ext_coeffs(img):
             "I505": 3.490,
             "I527": 3.304,
         },
+        "CLAUDS": {
+            "U": 4.01,
+            "US": 4.12,
+            "G": 3.24,
+            "R": 2.276,
+            "I": 1.633,
+            "Z": 1.263,
+            "Y": 1.075,
+        },
     }
 
     if img == "odin":
@@ -270,6 +317,10 @@ def get_ext_coeffs(img):
     if img == "suprime":
 
         mydict = {_: tmpdict[_] for _ in ["SUPRIME", "HSC"]}
+
+    if img == "clauds":
+
+        mydict = {_: tmpdict[_] for _ in ["CLAUDS"]}
 
     return mydict
 
@@ -300,12 +351,18 @@ def get_cosmos2020_fn(case):
     return fn
 
 
-def get_clauds_fn(case):
+def get_clauds_fn(case, offset=False, uband="u"):
     """
     Get the Desprez+23 CLAUDS SExtractor catalog full path
 
     Args:
         case: round of DESI observation (str)
+        offset (optional, defaults to False): if True, use custom catalogs
+            with per-HSC pointing photometric offset on the Desprez+23 catalogs,
+            (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
+            (bool)
+        uband (optional, defaults to "u"): required if offset=True;
+            can be either "u" or "uS" (str)
 
     Returns:
         fn: full path of the catalog (str)
@@ -314,16 +371,27 @@ def get_clauds_fn(case):
 
     fn = None
     claudsdir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "clauds", "dr"
+        os.getenv("DESI_ROOT"),
+        "users",
+        "raichoor",
+        "laelbg",
+        "clauds",
+        "phot",
     )
 
-    if case[:6] == "cosmos":
+    field = case[:6]
 
-        fn = os.path.join(claudsdir, "COSMOS_6bands-SExtractor-Lephare.fits")
+    if offset:
 
-    if case[:6] == "xmmlss":
+        offset_str = "-offset"
 
-        fn = os.path.join(claudsdir, "XMMLSS_6bands-SExtractor-Lephare.fits")
+    else:
+
+        offset_str = ""
+
+    fn = os.path.join(
+        claudsdir, "{}_11bands-SExtractor-Lephare{}.fits".format(field.upper(), offset_str)
+    )
 
     return fn
 
@@ -357,6 +425,14 @@ def get_vi_fns(img):
         )
         fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz")]
         tidkey, zkey, qualkey = "TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL"
+
+    if img == "clauds":
+
+        mydir = os.path.join(
+            os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "clauds", "vi"
+        )
+        fns = [os.path.join(mydir, "vi-80871-merged.fits")]
+        tidkey, zkey, qualkey = "TARGETID", "VI_Z", "VI_QUALITY"
 
     return fns, tidkey, zkey, qualkey
 
@@ -477,18 +553,18 @@ def get_coaddfns(img, case):
 
     specdir = get_specdir(img, case)
 
-    if img in ["odin"]:
+    if img in ["odin", "clauds"]:
 
         if case == "cosmos_yr1":
 
             coaddfns = sorted(glob(os.path.join(specdir, "coadd-27???.fits")))
 
-    if img in ["odin"]:
+    if img in ["odin", "clauds"]:
 
         if case == "xmmlss_yr2":
             coaddfns = sorted(glob(os.path.join(specdir, "coadd-17???.fits")))
 
-    if img in ["odin", "suprime"]:
+    if img in ["odin", "suprime", "clauds"]:
 
         if case == "cosmos_yr2":
 
@@ -594,6 +670,29 @@ def get_img_infos(img, case, stdsky):
 
                 mydict = get_suprime_cosmos_yr2_infos()
 
+        if img == "clauds":
+
+            from desihizmerge.hizmerge_clauds import (
+                get_clauds_cosmos_yr1_infos,
+                get_clauds_xmmlss_yr2_infos,
+                get_clauds_cosmos_yr2_infos,
+            )
+
+            if case == "cosmos_yr1":
+                mydict = get_clauds_cosmos_yr1_infos()
+            if case == "xmmlss_yr2":
+                mydict = get_clauds_xmmlss_yr2_infos()
+            if case == "cosmos_yr2":
+                mydict = get_clauds_cosmos_yr2_infos()
+
+    bands = get_img_bands(img)
+    for band in bands:
+        log.info(
+            "\t{}{}\t{}\tfound {} targets".format(
+                img, case, band, len(mydict[band]["TARGETID"])
+            )
+        )
+
     return mydict
 
 
@@ -610,7 +709,11 @@ def read_targfn(targfn):
         p: astropy.table.Table() array
     """
 
-    p = Table(fitsio.read(targfn))
+    # CLAUDS official catalogs cannot be read with Table(fitsio.read())..
+    if "11bands-SExtractor-Lephare" in os.path.basename(targfn):
+        p = Table(fits.open(targfn)[1].data)
+    else:
+        p = Table(fitsio.read(targfn))
 
     # change colnames to upper cases
     for key in p.colnames:
@@ -655,6 +758,47 @@ def read_targfn(targfn):
                             key.replace(oldroot, newroot),
                         )
                     )
+
+    # CLAUDS:
+    # - homogenize some column names
+    # - convert FLAG_FIELD_BINARY into a bit-coded int,
+    #       as it s a pain to handle a 7-element array downstream..
+    if os.path.basename(targfn) in [
+        "COSMOS_11bands-SExtractor-Lephare.fits",
+        "COSMOS_11bands-SExtractor-Lephare-offset.fits",
+        "XMMLSS_11bands-SExtractor-Lephare.fits",
+        "XMMLSS_11bands-SExtractor-Lephare-offset.fits",
+    ]:
+
+        for key in p.colnames:
+
+            p[key].name = key.upper()
+
+        p["EB_V"].name = "EBV"
+        log.info("{}: rename EB_V to EBV".format(os.path.basename(targfn)))
+
+        for band in ["U", "US", "G", "R", "I", "Z", "Y"]:
+
+            p[band].name = "MAG_EXTCORR_{}".format(band)
+            p["{}_ERR".format(band)].name = "MAG_ERR_{}".format(band)
+            log.info(
+                "{}: rename {} to MAG_EXTCORR_{} and {}_ERR to MAG_ERR_{}".format(
+                    os.path.basename(targfn), band, band, band, band
+                )
+            )
+
+        p["FLAG_FIELD_BINARY_INT"] = 0
+
+        for i in range(p["FLAG_FIELD_BINARY"].shape[1]):
+
+            p["FLAG_FIELD_BINARY_INT"] += 2 ** p["FLAG_FIELD_BINARY"][:, i].astype(int)
+
+        p.remove_column("FLAG_FIELD_BINARY")
+        log.info(
+            "{}: remove FLAG_FIELD_BINARY, add FLAG_FIELD_BINARY_INT".format(
+                os.path.basename(targfn)
+            )
+        )
 
     log.info("{} colnames: {}".format(os.path.basename(targfn), ", ".join(p.colnames)))
 
@@ -1084,7 +1228,7 @@ def get_expids(img, case):
     return d
 
 
-def get_phot_fns(img, case, band, photdir=None):
+def get_phot_fns(img, case, band, photdir=None, offset=None):
     """
     Get the photometric tractor file name used for the target selection
 
@@ -1093,6 +1237,10 @@ def get_phot_fns(img, case, band, photdir=None):
         case: round of DESI observation (str)
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
+        offset (optional, defaults to False): for img=clauds, if True, use custom catalogs
+            with per-HSC pointing photometric offset on the Desprez+23 catalogs,
+            (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
+            (bool)
 
     Returns:
         mydict: a dictionary with a structure like {case_band: fn}
@@ -1143,6 +1291,17 @@ def get_phot_fns(img, case, band, photdir=None):
             for band in get_img_bands("suprime")
         }
 
+    # clauds
+    if img == "clauds":
+
+        mydict = {
+            "cosmos_yr1_UGR": [get_clauds_fn("cosmos_yr1", offset=offset, uband="u")],
+            "cosmos_yr1_GRI": [get_clauds_fn("cosmos_yr1", offset=offset, uband="u")],
+            "xmmlss_yr2_USGR": [get_clauds_fn("xmmlss_yr2", offset=offset, uband="uS")],
+            "cosmos_yr2_UGR": [get_clauds_fn("cosmos_yr2", offset=offset, uband="u")],
+            "cosmos_yr2_USGR": [get_clauds_fn("cosmos_yr2", offset=offset, uband="uS")],
+        }
+
     if "{}_{}".format(case, band) in mydict:
 
         return mydict["{}_{}".format(case, band)]
@@ -1185,42 +1344,87 @@ def get_phot_init_table(img, n):
 
     # column to identify the broad-band photometry source
     dtype += [
-        ("FILENAME", "S100"),
-        ("BB_IMG", "S3"),  # HSC or LS
+        ("FILENAME", "S150"),
+        ("BB_IMG", "S6"),  # HSC or LS or CLAUDS
     ]
 
-    # tractor columns
-    # https://github.com/legacysurvey/legacypipe/blob/cbde86f7f78692091fca7b48d423450074aa0472/bin/generate-sweep-files.py#L360-L574
-    dtype += [
-        ("RELEASE", ">i2"),
-        ("BRICKID", ">i4"),
-        ("BRICKNAME", "S8"),
-        ("OBJID", ">i4"),
-        ("BRICK_PRIMARY", "|b1"),
-        ("MASKBITS", ">i4"),
-        ("FITBITS", ">i2"),
-        ("TYPE", "S3"),
-        ("RA", ">f8"),
-        ("DEC", ">f8"),
-        ("EBV", ">f4"),
-    ]
+    if img in ["odin", "suprime"]:
 
-    # img fluxs + depths
-    for band in bands:
-
+        # tractor columns
+        # https://github.com/legacysurvey/legacypipe/blob/cbde86f7f78692091fca7b48d423450074aa0472/bin/generate-sweep-files.py#L360-L574
         dtype += [
-            ("FLUX_{}".format(band), ">f4"),
-            ("FLUX_IVAR_{}".format(band), ">f4"),
-            ("FIBERFLUX_{}".format(band), ">f4"),
-            ("PSFDEPTH_{}".format(band), ">f4"),
+            ("RELEASE", ">i2"),
+            ("BRICKID", ">i4"),
+            ("BRICKNAME", "S8"),
+            ("OBJID", ">i4"),
+            ("BRICK_PRIMARY", "|b1"),
+            ("MASKBITS", ">i4"),
+            ("FITBITS", ">i2"),
+            ("TYPE", "S3"),
+            ("RA", ">f8"),
+            ("DEC", ">f8"),
+            ("EBV", ">f4"),
         ]
 
-    # ls-{dr9.1.1,dr10} or hsc fluxes
-    for band in ["G", "R", "R2", "I", "I2", "Z"]:
+        # img fluxs + depths
+        for band in bands:
 
+            dtype += [
+                ("FLUX_{}".format(band), ">f4"),
+                ("FLUX_IVAR_{}".format(band), ">f4"),
+                ("FIBERFLUX_{}".format(band), ">f4"),
+                ("PSFDEPTH_{}".format(band), ">f4"),
+            ]
+
+        # ls-{dr9.1.1,dr10} or hsc fluxes
+        for band in ["G", "R", "R2", "I", "I2", "Z"]:
+
+            dtype += [
+                ("FORCED_FLUX_{}".format(band), ">f4"),
+                ("FORCED_FLUX_IVAR_{}".format(band), ">f4"),
+            ]
+
+    if img in ["clauds"]:
+
+        # sextractor columns
+        # $DESI_ROOT/users/raichoor/laelbg/clauds/dr/COSMOS_11bands-SExtractor-Lephare.fits
         dtype += [
-            ("FORCED_FLUX_{}".format(band), ">f4"),
-            ("FORCED_FLUX_IVAR_{}".format(band), ">f4"),
+            ("ID", ">i8"),
+            ("RA", ">f8"),
+            ("DEC", ">f8"),
+            ("MASK", ">i2"),
+            ("FLAG_FIELD", ">i2"),
+            ("A_WORLD", ">f4"),
+            ("B_WORLD", ">f4"),
+            ("KRON_RADIUS", ">f4"),
+            ("THETA_WORLD", ">f4"),
+            ("ELONGATION", ">f4"),
+            ("ELLIPTICITY", ">f4"),
+            ("EBV", ">f8"),
+            ("FWHM_WORLD_HSC_I", ">f4"),
+            ("MU_MAX_HSC_I", ">f4"),
+            ("CLASS_STAR_HSC_I", ">f4"),
+            ("FLUX_RADIUS_0.25_HSC_I", ">f4"),
+            ("FLUX_RADIUS_0.5_HSC_I", ">f4"),
+            ("FLUX_RADIUS_0.75_HSC_I", ">f4"),
+            ("MAG_EXTCORR_U", ">f8"),
+            ("MAG_EXTCORR_US", ">f8"),
+            ("MAG_EXTCORR_G", ">f8"),
+            ("MAG_EXTCORR_R", ">f8"),
+            ("MAG_EXTCORR_I", ">f8"),
+            ("MAG_EXTCORR_Z", ">f8"),
+            ("MAG_EXTCORR_Y", ">f8"),
+            ("MAG_ERR_U", ">f8"),
+            ("MAG_ERR_US", ">f8"),
+            ("MAG_ERR_G", ">f8"),
+            ("MAG_ERR_R", ">f8"),
+            ("MAG_ERR_I", ">f8"),
+            ("MAG_ERR_Z", ">f8"),
+            ("MAG_ERR_Y", ">f8"),
+            ("ST_TRAIL", ">i8"),
+            ("CLEAN", "bool"),
+            # ("FLAG_FIELD_BINARY", "bool"),
+            ("FLAG_FIELD_BINARY_INT", ">i4"),
         ]
 
     t = Table(np.zeros(n, dtype=dtype))
@@ -1228,7 +1432,7 @@ def get_phot_init_table(img, n):
     return t
 
 
-def get_phot_table(img, case, specinfo_table, photdir):
+def get_phot_table(img, case, specinfo_table, photdir, offset=False):
     """
     Get the photometric information for a given {img, case}
 
@@ -1238,6 +1442,10 @@ def get_phot_table(img, case, specinfo_table, photdir):
         specinfo_table: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
+        offset (optional, defaults to False): for img=clauds, if True, use custom catalogs
+            with per-HSC pointing photometric offset on the Desprez+23 catalogs,
+            (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
+            (bool)
 
     Returns:
         d: the phot table, row-matched to specinfo_table (array)
@@ -1274,17 +1482,28 @@ def get_phot_table(img, case, specinfo_table, photdir):
             case, specinfo_table, photdir
         )
 
+    if img == "clauds":
+
+        from desihizmerge.hizmerge_clauds import get_clauds_phot_infos
+
+        d["ID"], d["FILENAME"] = get_clauds_phot_infos(case, specinfo_table, photdir, offset=offset)
+
     # propagating columns from specinfo_table
-    for key in ["TARGETID", "STD", "SKY"] + bands + ["CASE"]:
+    keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]
+
+    for key in keys:
 
         d[key] = specinfo_table[key]
 
     # unique identifier (from a tractor catalog point of view)
     #   note that for odin:
-    #       cosmos_yr1, N673 actually have 373 duplicated d_brickobjs...
-    d_brickobjs = np.array(
-        ["{}-{}".format(b, o) for b, o in zip(d["BRICKNAME"], d["OBJID"])]
-    )
+    #       cosmos_yr1, N673 actually have 373 duplicated d_unqids...
+    if img in ["odin", "suprime"]:
+        d_unqids = np.array(
+            ["{}-{}".format(b, o) for b, o in zip(d["BRICKNAME"], d["OBJID"])]
+        )
+    if img in ["clauds"]:
+        d_unqids = d["ID"].copy()
 
     targfns = np.unique(d["FILENAME"])
     log.info("targfns = {}".format(", ".join(targfns)))
@@ -1294,18 +1513,26 @@ def get_phot_table(img, case, specinfo_table, photdir):
 
         # cut d
         iid = np.where(d["FILENAME"] == targfn)[0]
-        dcut, dcut_brickobjs = d[iid], d_brickobjs[iid]
+        dcut, dcut_unqids = d[iid], d_unqids[iid]
 
-        for key in d.colnames:
-
-            if key not in [
+        ignore_keys = (
+            [
                 "TARGETID",
                 "STD",
                 "SKY",
-                "BRICKNAME",
-                "OBJID",
                 "FILENAME",
-            ] + bands + ["CASE"]:
+            ]
+            + bands
+            + ["CASE"]
+        )
+        if img in ["odin", "suprime"]:
+            ignore_keys += ["BRICKNAME", "OBJID"]
+        if img in ["clauds"]:
+            ignore_keys += ["ID"]
+
+        for key in d.colnames:
+
+            if key not in ignore_keys:
 
                 assert np.all(
                     np.unique(dcut[key]) == np.zeros_like(dcut[key], shape=(1,))
@@ -1323,90 +1550,110 @@ def get_phot_table(img, case, specinfo_table, photdir):
         # read input photometry (with some column names manipulation)
         p = read_targfn(os.path.join(photdir, os.path.basename(targfn)))
 
-        p_brickobjs = np.array(
-            ["{}-{}".format(b, o) for b, o in zip(p["BRICKNAME"], p["OBJID"])]
-        )
-        _, ii = np.unique(p_brickobjs, return_index=True)
+        if img in ["odin", "suprime"]:
+            p_unqids = np.array(
+                ["{}-{}".format(b, o) for b, o in zip(p["BRICKNAME"], p["OBJID"])]
+            )
+        if img in ["clauds"]:
+            p_unqids = p["ID"].copy()
+
+        _, ii = np.unique(p_unqids, return_index=True)
 
         if ii.size != len(p):
 
             log.info("{}:\tremove {} duplicates".format(targfn, len(p) - ii.size))
-            p, p_brickobjs = p[ii], p_brickobjs[ii]
+            p, p_unqids = p[ii], p_unqids[ii]
 
         # cut on targetids present in specinfo_table
         #   to speed up things
         # note: as cosmos_yr1, N673 has some duplicates
-        sel = np.in1d(p_brickobjs, dcut_brickobjs)
-        p, p_brickobjs = p[sel], p_brickobjs[sel]
-        assert np.all(np.in1d(dcut_brickobjs, p_brickobjs))
+        sel = np.in1d(p_unqids, dcut_unqids)
+        p, p_unqids = p[sel], p_unqids[sel]
+        assert np.all(np.in1d(dcut_unqids, p_unqids))
 
         # now p is rather small so we can just loop
         #   to row-match it to dcut
-        ii = [
-            np.where(p_brickobjs == dcut_brickobj)[0][0]
-            for dcut_brickobj in dcut_brickobjs
-        ]
-        p, p_brickobjs = p[ii], p_brickobjs[ii]
-        assert np.all(p_brickobjs == dcut_brickobjs)
-        assert np.all(p["BRICKNAME"] == dcut["BRICKNAME"])
-        assert np.all(p["OBJID"] == dcut["OBJID"])
+        ii = [np.where(p_unqids == dcut_unqid)[0][0] for dcut_unqid in dcut_unqids]
+        p, p_unqids = p[ii], p_unqids[ii]
+        assert np.all(p_unqids == dcut_unqids)
+        if img in ["odin", "suprime"]:
+            assert np.all(p["BRICKNAME"] == dcut["BRICKNAME"])
+            assert np.all(p["OBJID"] == dcut["OBJID"])
+        if img in ["clauds"]:
+            assert np.all(p["ID"] == dcut["ID"])
 
-        # easy columns..
-        for key in [
-            "RELEASE",
-            "BRICKID",
-            "BRICK_PRIMARY",
-            "MASKBITS",
-            "FITBITS",
-            "TYPE",
-            "RA",
-            "DEC",
-            "EBV",
-        ]:
+        if img in ["odin", "suprime"]:
+            # easy columns..
+            for key in [
+                "RELEASE",
+                "BRICKID",
+                "BRICK_PRIMARY",
+                "MASKBITS",
+                "FITBITS",
+                "TYPE",
+                "RA",
+                "DEC",
+                "EBV",
+            ]:
 
-            dcut[key] = p[key]
+                dcut[key] = p[key]
 
-        for band in bands:
+            for band in bands:
 
-            if "FLUX_{}".format(band) in p.colnames:
+                if "FLUX_{}".format(band) in p.colnames:
 
-                for key in [
-                    "FLUX_{}".format(band),
-                    "FLUX_IVAR_{}".format(band),
-                    "FIBERFLUX_{}".format(band),
-                    "PSFDEPTH_{}".format(band),
-                ]:
+                    for key in [
+                        "FLUX_{}".format(band),
+                        "FLUX_IVAR_{}".format(band),
+                        "FIBERFLUX_{}".format(band),
+                        "PSFDEPTH_{}".format(band),
+                    ]:
 
-                    dcut[key] = p[key]
+                        dcut[key] = p[key]
 
-            else:
+                else:
 
-                log.warning("FLUX_{} not in p.colnames".format(band))
+                    log.warning("FLUX_{} not in p.colnames".format(band))
 
-        # dr or hsc?
-        dcut["BB_IMG"] = get_bb_img(targfn)
+            # dr or hsc?
+            dcut["BB_IMG"] = get_bb_img(targfn)
 
-        # now bb photometry
-        for band in ["G", "R", "R2", "I", "I2", "Z"]:
+            # now bb photometry
+            for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
-            if "FORCED_FLUX_{}".format(band) in p.colnames:
+                if "FORCED_FLUX_{}".format(band) in p.colnames:
 
-                for key in [
-                    "FORCED_FLUX_{}".format(band),
-                    "FORCED_FLUX_IVAR_{}".format(band),
-                ]:
+                    for key in [
+                        "FORCED_FLUX_{}".format(band),
+                        "FORCED_FLUX_IVAR_{}".format(band),
+                    ]:
 
-                    dcut[key] = p[key]
+                        dcut[key] = p[key]
+
+        if img in ["clauds"]:
+
+            dcut["BB_IMG"] = get_bb_img(targfn)
+
+            for key in p.colnames:
+
+                dcut[key] = p[key]
 
         # update d
         d[iid] = dcut
 
     search_radius = 1.0
-    sel = np.zeros(len(d), dtype=bool)
 
-    for band in bands:
+    if img in ["odin", "suprime"]:
 
-        sel |= d[band]
+        sel = np.zeros(len(d), dtype=bool)
+
+        for band in bands:
+
+            sel |= d[band]
+
+    if img in ["clauds"]:
+
+        sel = np.ones(len(d), dtype=bool)
 
     iibands = np.where(sel)[0]
 
@@ -1435,6 +1682,8 @@ def get_phot_table(img, case, specinfo_table, photdir):
         d["COSMOS2020_ZPHOT"][iibands[iid]] = z["lp_zBEST"][iiz]
 
     # add zphot clauds
+    # remark: as the "official" and offset catalogs are row-matched
+    #           there is no need to distinguish for the zphots
     fn = get_clauds_fn(case)
     log.info("clauds_fn = {}".format(fn))
     d["CLAUDS"] = np.zeros(len(d), dtype=bool)
@@ -1457,6 +1706,67 @@ def get_phot_table(img, case, specinfo_table, photdir):
         d["CLAUDS"][iibands[iid]] = True
         d["CLAUDS_ID"][iibands[iid]] = z["ID"][iiz]
         d["CLAUDS_ZPHOT"][iibands[iid]] = z["Z_BEST"][iiz]
+
+    # clauds cosmos_yr1: at least DESILBG_TMG_FINAL and DESILBG_BXU_FINAL
+    #   have objects in common, but those have different TARGETIDs
+    #   such duplicates are excluded with the approach above
+    #   we here handle them
+    if (img == "clauds") & (case == "cosmos_yr1"):
+
+        claudsids = d["ID"]
+        unq_claudsids, counts = np.unique(claudsids, return_counts=True)
+        unq_claudsids = unq_claudsids[counts > 1]  # cut on repeats
+        unq_claudsids = unq_claudsids[
+            np.in1d(unq_claudsids, claudsids[iid])
+        ]  # cut on matched rows for this band
+        log.info(
+            "{}\t{}\thandle {} CLAUDS ID which have repeats".format(
+                img, case, unq_claudsids.size
+            )
+        )
+        fill_counts = 0
+        fill_keys = [
+            "COSMOS2020",
+            "COSMOS2020_ID",
+            "COSMOS2020_ZPHOT",
+            "CLAUDS",
+            "CLAUDS_ID",
+            "CLAUDS_ZPHOT",
+        ]
+        log.info(
+            "{}\t{}\twill propagate values for: {}".format(
+                img, case, ", ".join(fill_keys)
+            )
+        )
+
+        for unqclaudsid in unq_claudsids:
+
+            ii = np.where(claudsids == unqclaudsid)[0]
+            assert np.all(np.in1d(ii, iibands))
+            tmpdict = {key: d[key][ii] for key in fill_keys}
+            assert ii.size > 1
+            tmp_fill_keys = [
+                key for key in fill_keys if np.unique(tmpdict[key]).size > 1
+            ]
+            log.info(
+                "CLAUDS ID={}\t: fill {}".format(unqclaudsid, ", ".join(tmp_fill_keys))
+            )
+            tmpvals = {
+                key: [
+                    _ for _ in tmpdict[key] if _ != np.zeros_like(d[key], shape=(1,))[0]
+                ][0]
+                for key in tmp_fill_keys
+            }
+            # overwrite the already recorded (matched) value, but ok, simpler code-wise
+            for key in tmp_fill_keys:
+                d[key][ii] = tmpvals[key]
+            fill_counts += ii.size - 1  # because one value was already filled
+
+        log.info(
+            "{}\t{}\tfill an additional {}/{} rows with handling duplicates".format(
+                img, case, fill_counts, iibands.size
+            )
+        )
 
     return d
 
@@ -1593,14 +1903,14 @@ def get_spec_table(img, case, stack_s, mydict):
                 log.info("{} has {} rows".format(os.path.basename(fn), len(vi)))
                 log.info(
                     "VI added for {}/{} targets".format(
-                        (d["VI_QUALITY"] != -99).sum(), iibands.size
+                        (np.isfinite(d["VI_QUALITY"])).sum(), iibands.size
                     )
                 )
 
     return d
 
 
-def merge_cases(img, stack_ss, spec_ds, phot_ds, exps_ds):
+def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
     """
     Stacks results from the different cases
 
@@ -1608,13 +1918,17 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, exps_ds):
         img: element from allowed_imgs (str)
         stack_ss: list of NCASE Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
         spec_ds: list of NCASE specinfo tables from get_spec_table() (list of arrays)
-        phot_ds: list of NCASE photinfo tables from get_phot_table() (list of arrays)
+        phot_ds: list of NCASE photinfo tables from get_phot_table()
+            is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
+        phot_offset_ds: same as phot_ds, but for phot. with offsets;
+            is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_ds: list of NCASE exps tables from get_expids() (list of arrays)
 
     Returns:
         stack_s: stack of stack_ss
         spec_d: stack of spec_ds
         phot_d: stack of phot_ds
+        phot_offset_d: stack of phot_offset_ds for clauds; None otherwise
         exps_d: stack exps_ds
     """
     # stack_s
@@ -1630,15 +1944,31 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, exps_ds):
     spec_d = vstack([spec_ds[case] for case in cases])
 
     # phot_ds
-    assert np.all(cases == list(phot_ds.keys()))
-
-    if np.sum([phot_ds[case] is None for case in cases]) == len(phot_ds):
+    if phot_ds is None:
 
         phot_d = None
 
     else:
 
+        assert np.all(cases == list(phot_ds.keys()))
         phot_d = vstack([phot_ds[case] for case in cases])
+
+    # phot_offset_ds
+    if phot_offset_ds is None:
+
+        phot_offset_d = None
+
+    else:
+
+        assert np.all(cases == list(phot_offset_ds.keys()))
+
+        if np.sum([phot_offset_ds[case] is None for case in cases]) == len(phot_offset_ds):
+
+            phot_offset_d = None
+
+        else:
+
+            phot_offset_d = vstack([phot_offset_ds[case] for case in cases])
 
     # expids_ds
     assert np.all(cases == list(exps_ds.keys()))
@@ -1646,16 +1976,16 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, exps_ds):
 
     # TODO: handle possible duplicates?
 
-    return stack_s, spec_d, phot_d, exps_d
+    return stack_s, spec_d, phot_d, phot_offset_d, exps_d
 
 
 def build_hs(
     img,
     cases,
-    stdsky,
     stack_s,
     spec_d,
     phot_d,
+    phot_offset_d,
     exps_d,
 ):
     """
@@ -1664,10 +1994,12 @@ def build_hs(
     Args:
         img: element from allowed_imgs (str)
         cases: list of round of DESI observations (list of str)
-        stdsky: are we dealing with standard stars (STD) + sky (SKY)? (boolean)
         stack_s: Spectra() object, resulting from create_coadd_merge() and spectra_stack() (list of Spectra objects)
         spec_d: specinfo table from get_spec_table() (list of arrays)
-        phot_d: photinfo table from get_phot_table() (list of arrays)
+        phot_d: photinfo table from get_phot_table()
+            is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
+        phot_offset_d: as phot_d, but for phot. with offset; relevant only for clauds; otherwise
+            is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_d: exps table from get_expids() (list of arrays)
 
     Returns:
@@ -1720,13 +2052,18 @@ def build_hs(
         h.data = d
         hs.append(h)
 
-    # specinfo, photinfo, expids
+    # specinfo, photinfo, photoffinfo, expids
     ds, extnames = [spec_d], ["SPECINFO"]
 
-    if not stdsky:
+    if phot_d is not None:
 
         ds.append(phot_d)
         extnames.append("PHOTINFO")
+
+    if phot_offset_d is not None:
+
+        ds.append(phot_offset_d)
+        extnames.append("PHOTOFFINFO")
 
     ds.append(exps_d)
     extnames.append("EXPIDS")
@@ -1751,8 +2088,8 @@ def build_hs(
             fns, _, _, _ = get_vi_fns(img)
             h.header["VIFNS"] = ",".join(fns)
 
-        # PHOTINFO: cases, ext. coeffs (a bit hacky...), zphot fns
-        if extname == "PHOTINFO":
+        # PHOTINFO, PHOTOFFINFO: cases, ext. coeffs (a bit hacky...), zphot fns
+        if extname in ["PHOTINFO", "PHOTOFFINFO"]:
 
             exts = get_ext_coeffs(img)
             h.header.append(
