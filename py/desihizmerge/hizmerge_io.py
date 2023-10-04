@@ -1021,6 +1021,7 @@ def create_coadd_merge(cofn, tids, stdsky):
 
     Notes:
         See https://desidatamodel.readthedocs.io/en/latest/DESI_SPECTRO_REDUX/SPECPROD/healpix/SURVEY/PROGRAM/PIXGROUP/PIXNUM/coadd-SURVEY-PROGRAM-PIXNUM.html
+        We add a COADDFN column to s.fibermap
     """
     s = read_spectra(cofn)
     fm = s.fibermap
@@ -1053,6 +1054,8 @@ def create_coadd_merge(cofn, tids, stdsky):
         s = s.select(targets=tids)
         # coadd cameras
         s = coadd_cameras(s)
+        # coaddfn
+        s.fibermap["COADDFN"] = cofn
 
         return s
 

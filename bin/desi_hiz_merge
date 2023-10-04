@@ -143,10 +143,6 @@ def main():
 
         # specinfo table
         spec_ds[case] = get_spec_table(args.img, case, stack_ss[case], mydicts[case])
-        all_cofns = []
-        for cofn, s in zip(cofns, ss):
-            all_cofns += [cofn for _ in s.fibermap]
-        spec_ds[case]["COADDFN"] = all_cofns
 
         # photinfo table
         if not args.stdsky:
