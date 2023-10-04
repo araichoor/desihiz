@@ -731,16 +731,16 @@ def read_targfn(targfn):
 
             if "FORCED_MEAN_FLUX" in key:
 
-                p[key].name = key.replace("FORCED_MEAN_FLUX", "FORCED_FLUX")
+                p[key].name = key.replace("FORCED_MEAN_FLUX", "FLUX")
                 log.info(
                     "{}:\trename {} to {}".format(
                         os.path.basename(targfn),
                         key,
-                        key.replace("FORCED_MEAN_FLUX", "FORCED_FLUX"),
+                        key.replace("FORCED_MEAN_FLUX", "FLUX"),
                     )
                 )
 
-    # SUPRIME: ix/homogenize some column names
+    # SUPRIME: fix/homogenize some column names
     if os.path.basename(targfn) == "Subaru_tractor_forced_all.fits.gz":
 
         for band in get_img_bands("suprime"):
@@ -759,8 +759,21 @@ def read_targfn(targfn):
                         )
                     )
 
+                if "FORCED_FLUX" in key:
+
+                    p[key].name = key.replace("FORCED_FLUX", "FLUX")
+                    log.info(
+                        "{}:\trename {} to {}".format(
+                            os.path.basename(targfn),
+                            key,
+                            key.replace("FORCED_FLUX", "FLUX"),
+                        )
+                    )
+
+
     # CLAUDS:
-    # - homogenize some column names
+    # - homogenize some column names (EBV)
+    # - convert ext.corr-mags and magerr to nanomaggies
     # - convert FLAG_FIELD_BINARY into a bit-coded int,
     #       as it s a pain to handle a 7-element array downstream..
     if os.path.basename(targfn) in [
@@ -779,10 +792,20 @@ def read_targfn(targfn):
 
         for band in ["U", "US", "G", "R", "I", "Z", "Y"]:
 
-            p[band].name = "MAG_EXTCORR_{}".format(band)
-            p["{}_ERR".format(band)].name = "MAG_ERR_{}".format(band)
+            # initializing with non-valid photometry values
+            p["FLUX_{}".format(band)] = -99.
+            p["FLUX_IVAR_{}".format(band)] = 0.
+            # re-include gal. extinction
+            mags = p[band] + get_ext_coeffs("clauds")["CLAUDS"][band] * p["EBV"]
+            # valid values
+            sel = (p[band] > 0) & (p["{}_ERR".format(band)] > 0)
+            # flux and flux_ivar in nanomaggies
+            p["FLUX_{}".format(band)][sel] = 10 ** (-0.4 * (mags[sel] - 22.5))
+            p["FLUX_IVAR_{}".format(band)][sel] = (
+                np.log(10) / 2.5 * p["{}_ERR".format(band)][sel] * p["FLUX_{}".format(band)][sel]
+            ) ** -2.
             log.info(
-                "{}: rename {} to MAG_EXTCORR_{} and {}_ERR to MAG_ERR_{}".format(
+                "{}: convert {} and {}_ERR to (reddened) FLUX_{} (nanomaggies) and FLUX_IVAR_{}".format(
                     os.path.basename(targfn), band, band, band, band
                 )
             )
@@ -1380,8 +1403,8 @@ def get_phot_init_table(img, n):
         for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
             dtype += [
-                ("FORCED_FLUX_{}".format(band), ">f4"),
-                ("FORCED_FLUX_IVAR_{}".format(band), ">f4"),
+                ("FLUX_{}".format(band), ">f4"),
+                ("FLUX_IVAR_{}".format(band), ">f4"),
             ]
 
     if img in ["clauds"]:
@@ -1407,20 +1430,20 @@ def get_phot_init_table(img, n):
             ("FLUX_RADIUS_0.25_HSC_I", ">f4"),
             ("FLUX_RADIUS_0.5_HSC_I", ">f4"),
             ("FLUX_RADIUS_0.75_HSC_I", ">f4"),
-            ("MAG_EXTCORR_U", ">f8"),
-            ("MAG_EXTCORR_US", ">f8"),
-            ("MAG_EXTCORR_G", ">f8"),
-            ("MAG_EXTCORR_R", ">f8"),
-            ("MAG_EXTCORR_I", ">f8"),
-            ("MAG_EXTCORR_Z", ">f8"),
-            ("MAG_EXTCORR_Y", ">f8"),
-            ("MAG_ERR_U", ">f8"),
-            ("MAG_ERR_US", ">f8"),
-            ("MAG_ERR_G", ">f8"),
-            ("MAG_ERR_R", ">f8"),
-            ("MAG_ERR_I", ">f8"),
-            ("MAG_ERR_Z", ">f8"),
-            ("MAG_ERR_Y", ">f8"),
+            ("FLUX_U", ">f8"),
+            ("FLUX_US", ">f8"),
+            ("FLUX_G", ">f8"),
+            ("FLUX_R", ">f8"),
+            ("FLUX_I", ">f8"),
+            ("FLUX_Z", ">f8"),
+            ("FLUX_Y", ">f8"),
+            ("FLUX_IVAR_U", ">f8"),
+            ("FLUX_IVAR_US", ">f8"),
+            ("FLUX_IVAR_G", ">f8"),
+            ("FLUX_IVAR_R", ">f8"),
+            ("FLUX_IVAR_I", ">f8"),
+            ("FLUX_IVAR_Z", ">f8"),
+            ("FLUX_IVAR_Y", ">f8"),
             ("ST_TRAIL", ">i8"),
             ("CLEAN", "bool"),
             # ("FLAG_FIELD_BINARY", "bool"),
@@ -1621,11 +1644,11 @@ def get_phot_table(img, case, specinfo_table, photdir, offset=False):
             # now bb photometry
             for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
-                if "FORCED_FLUX_{}".format(band) in p.colnames:
+                if "FLUX_{}".format(band) in p.colnames:
 
                     for key in [
-                        "FORCED_FLUX_{}".format(band),
-                        "FORCED_FLUX_IVAR_{}".format(band),
+                        "FLUX_{}".format(band),
+                        "FLUX_IVAR_{}".format(band),
                     ]:
 
                         dcut[key] = p[key]
