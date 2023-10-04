@@ -740,7 +740,7 @@ def read_targfn(targfn):
                     )
                 )
 
-    # SUPRIME: ix/homogenize some column names
+    # SUPRIME: fix/homogenize some column names
     if os.path.basename(targfn) == "Subaru_tractor_forced_all.fits.gz":
 
         for band in get_img_bands("suprime"):
@@ -758,6 +758,18 @@ def read_targfn(targfn):
                             key.replace(oldroot, newroot),
                         )
                     )
+
+                if "FORCED_FLUX" in key:
+
+                    p[key].name = key.replace("FORCED_FLUX", "FLUX")
+                    log.info(
+                        "{}:\trename {} to {}".format(
+                            os.path.basename(targfn),
+                            key,
+                            key.replace("FORCED_FLUX", "FLUX"),
+                        )
+                    )
+
 
     # CLAUDS:
     # - homogenize some column names (EBV)
