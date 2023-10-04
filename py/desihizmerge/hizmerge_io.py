@@ -731,12 +731,12 @@ def read_targfn(targfn):
 
             if "FORCED_MEAN_FLUX" in key:
 
-                p[key].name = key.replace("FORCED_MEAN_FLUX", "FORCED_FLUX")
+                p[key].name = key.replace("FORCED_MEAN_FLUX", "FLUX")
                 log.info(
                     "{}:\trename {} to {}".format(
                         os.path.basename(targfn),
                         key,
-                        key.replace("FORCED_MEAN_FLUX", "FORCED_FLUX"),
+                        key.replace("FORCED_MEAN_FLUX", "FLUX"),
                     )
                 )
 
@@ -1380,8 +1380,8 @@ def get_phot_init_table(img, n):
         for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
             dtype += [
-                ("FORCED_FLUX_{}".format(band), ">f4"),
-                ("FORCED_FLUX_IVAR_{}".format(band), ">f4"),
+                ("FLUX_{}".format(band), ">f4"),
+                ("FLUX_IVAR_{}".format(band), ">f4"),
             ]
 
     if img in ["clauds"]:
@@ -1621,11 +1621,11 @@ def get_phot_table(img, case, specinfo_table, photdir, offset=False):
             # now bb photometry
             for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
-                if "FORCED_FLUX_{}".format(band) in p.colnames:
+                if "FLUX_{}".format(band) in p.colnames:
 
                     for key in [
-                        "FORCED_FLUX_{}".format(band),
-                        "FORCED_FLUX_IVAR_{}".format(band),
+                        "FLUX_{}".format(band),
+                        "FLUX_IVAR_{}".format(band),
                     ]:
 
                         dcut[key] = p[key]
