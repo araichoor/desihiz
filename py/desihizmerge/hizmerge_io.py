@@ -433,7 +433,7 @@ def get_vi_fns(img):
         mydir = os.path.join(
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "clauds", "vi"
         )
-        fns = [os.path.join(mydir, "vi-80871-merged.fits")]
+        fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V3.ecsv")]
 
     return fns
 
@@ -448,38 +448,50 @@ def read_vi_fn(fn):
     Returns:
         d: astropy Table()
     """
-    d = Table(fitsio.read(fn))
-    log.info("{}\t: read {} rows".format(os.path.basename(fn), len(d)))
 
-    # odin, subaru
-    # - subaru: add dummy VI_SPECTYPE_FINAL
+    basename = os.path.basename(fn)
+
+    if basename.split(os.path.extsep)[-1] == "ecsv":
+        d = Table.read(fn)
+    else:
+        d = Table(fitsio.read(fn))
+    log.info("{}\t: read {} rows".format(basename, len(d)))
+
+    # expected file names per img
+    basenames = {
+        img : [os.path.basename(_) for _ in get_vi_fns(img)]
+        for img in allowed_imgs
+    }
+
+    # odin, suprime
+    # - suprime: add dummy VI_SPECTYPE_FINAL
     # - rename columns
-    if os.path.basename(fn) in [
-        "FINAL_VI_ODIN_N501_v20230913.fits",
-        "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz",
-    ]:
-        if os.path.basename(fn) == "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz":
+    if (basename in basenames["odin"]) | (basename in basenames["suprime"]):
+        key_olds = ["VI_Z_FINAL", "VI_QUALITY_FINAL", "VI_SPECTYPE_FINAL", "VI_COMMENTS_FINAL"]
+        key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
+        if basename in basenames["odin"]:
+            key_olds = ["VI_TARGETID"] + key_olds
+            key_news = ["TARGETID"] + key_news
+        if basename in basenames["suprime"]:
             d["VI_SPECTYPE_FINAL"] = np.zeros(len(d), dtype="<U10")
-            log.info("{}\t: add dummy VI_SPECTYPE_FINAL".format(os.path.basename(fn)))
-        for key_old, key_new in zip(
-            ["VI_TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL", "VI_SPECTYPE_FINAL", "VI_COMMENTS_FINAL"],
-            ["TARGETID", "VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"],
-        ):
+            log.info("{}\t: add dummy VI_SPECTYPE_FINAL".format(basename))
+        for key_old, key_new in zip(key_olds, key_news):
             d[key_old].name = key_new
-            log.info("{}\t: rename {} to {}".format(os.path.basename(fn), key_old, key_new))
+            log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
 
     # clauds
     # - remove duplicates
     # - rename columns
-    if os.path.basename(fn) == "desi-vi-truth-table_fuji_V3.ecsv":
+    if basename in basenames["clauds"]:
         sel = d["DUPL"] != "d"
-        log.info("{}\t: remove {} duplicates".format(os.path.basename(fn), (~sel).sum()))
+        log.info("{}\t: remove {} duplicates".format(basename, (~sel).sum()))
+        d = d[sel]
         for key_old, key_new in zip(
             ["VI_quality", "VI_z", "VI_spectype", "VI_comment"],
             ["VI_QUALITY", "VI_Z", "VI_SPECTYPE", "VI_COMMENTS"],
         ):
             d[key_old].name = key_new
-            log.info("{}\t: rename {} to {}".format(os.path.basename(fn), key_old, key_new))
+            log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
 
     # we want no duplicates at this point
     assert np.unique(d["TARGETID"]).size == len(d)
