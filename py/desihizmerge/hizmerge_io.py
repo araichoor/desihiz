@@ -740,6 +740,25 @@ def read_targfn(targfn):
                     )
                 )
 
+    if os.path.basename(targfn) in [
+        "ODIN_N419_tractor_DR10_forced_all.fits.gz",
+        "ODIN_N419_tractor_HSC_forced_all.fits.gz",
+        "tractor-xmm-N419-hsc-forced.fits",
+    ]:
+
+        for key in p.colnames:
+
+            if "FORCED_FLUX" in key:
+
+                p[key].name = key.replace("FORCED_FLUX", "FLUX")
+                log.info(
+                    "{}:\trename {} to {}".format(
+                        os.path.basename(targfn),
+                        key,
+                        key.replace("FORCED_FLUX", "FLUX"),
+                    )
+                )
+
     # SUPRIME: fix/homogenize some column names
     if os.path.basename(targfn) == "Subaru_tractor_forced_all.fits.gz":
 
