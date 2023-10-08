@@ -709,8 +709,10 @@ def read_targfn(targfn):
         p: astropy.table.Table() array
     """
 
+    basename = os.path.basename(targfn)
+
     # CLAUDS official catalogs cannot be read with Table(fitsio.read())..
-    if "11bands-SExtractor-Lephare" in os.path.basename(targfn):
+    if "11bands-SExtractor-Lephare" in basename:
         p = Table(fits.open(targfn)[1].data)
     else:
         p = Table(fitsio.read(targfn))
@@ -722,7 +724,7 @@ def read_targfn(targfn):
 
     # ODIN: fix/homogenize some column names
 
-    if os.path.basename(targfn) in [
+    if basename in [
         "LAE_Candidates_NB501_v1_targeting.fits.gz",
         "LAE_Candidates_NB673_v0_targeting.fits.gz",
     ]:
@@ -734,13 +736,13 @@ def read_targfn(targfn):
                 p[key].name = key.replace("FORCED_MEAN_FLUX", "FLUX")
                 log.info(
                     "{}:\trename {} to {}".format(
-                        os.path.basename(targfn),
+                        basename,
                         key,
                         key.replace("FORCED_MEAN_FLUX", "FLUX"),
                     )
                 )
 
-    if os.path.basename(targfn) in [
+    if basename in [
         "ODIN_N419_tractor_DR10_forced_all.fits.gz",
         "ODIN_N419_tractor_HSC_forced_all.fits.gz",
         "tractor-xmm-N419-hsc-forced.fits",
@@ -753,14 +755,14 @@ def read_targfn(targfn):
                 p[key].name = key.replace("FORCED_FLUX", "FLUX")
                 log.info(
                     "{}:\trename {} to {}".format(
-                        os.path.basename(targfn),
+                        basename,
                         key,
                         key.replace("FORCED_FLUX", "FLUX"),
                     )
                 )
 
     # SUPRIME: fix/homogenize some column names
-    if os.path.basename(targfn) == "Subaru_tractor_forced_all.fits.gz":
+    if basename == "Subaru_tractor_forced_all.fits.gz":
 
         for band in get_img_bands("suprime"):
             oldroot, newroot = "I_A_L{}".format(band[1:]), band
@@ -772,7 +774,7 @@ def read_targfn(targfn):
                     p[key].name = key.replace(oldroot, newroot)
                     log.info(
                         "{}:\trename {} to {}".format(
-                            os.path.basename(targfn),
+                            basename,
                             key,
                             key.replace(oldroot, newroot),
                         )
@@ -783,7 +785,7 @@ def read_targfn(targfn):
                     p[key].name = key.replace("FORCED_FLUX", "FLUX")
                     log.info(
                         "{}:\trename {} to {}".format(
-                            os.path.basename(targfn),
+                            basename,
                             key,
                             key.replace("FORCED_FLUX", "FLUX"),
                         )
@@ -795,7 +797,7 @@ def read_targfn(targfn):
     # - convert ext.corr-mags and magerr to nanomaggies
     # - convert FLAG_FIELD_BINARY into a bit-coded int,
     #       as it s a pain to handle a 7-element array downstream..
-    if os.path.basename(targfn) in [
+    if basename in [
         "COSMOS_11bands-SExtractor-Lephare.fits",
         "COSMOS_11bands-SExtractor-Lephare-offset.fits",
         "XMMLSS_11bands-SExtractor-Lephare.fits",
@@ -807,7 +809,7 @@ def read_targfn(targfn):
             p[key].name = key.upper()
 
         p["EB_V"].name = "EBV"
-        log.info("{}: rename EB_V to EBV".format(os.path.basename(targfn)))
+        log.info("{}: rename EB_V to EBV".format(basename))
 
         for band in ["U", "US", "G", "R", "I", "Z", "Y"]:
 
@@ -825,7 +827,7 @@ def read_targfn(targfn):
             ) ** -2.
             log.info(
                 "{}: convert {} and {}_ERR to (reddened) FLUX_{} (nanomaggies) and FLUX_IVAR_{}".format(
-                    os.path.basename(targfn), band, band, band, band
+                    basename, band, band, band, band
                 )
             )
 
@@ -838,11 +840,11 @@ def read_targfn(targfn):
         p.remove_column("FLAG_FIELD_BINARY")
         log.info(
             "{}: remove FLAG_FIELD_BINARY, add FLAG_FIELD_BINARY_INT".format(
-                os.path.basename(targfn)
+                basename
             )
         )
 
-    log.info("{} colnames: {}".format(os.path.basename(targfn), ", ".join(p.colnames)))
+    log.info("{} colnames: {}".format(basename, ", ".join(p.colnames)))
 
     return p
 
