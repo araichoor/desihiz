@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+
+
+import os
+import numpy as np
+from desiutil.log import get_logger
+from desiutil.redirect import stdouterr_redirected
+from desihizmerge.suprime_photoff_io import (
+    read_photspecfn,
+    get_offsets,
+    get_ccdnames,
+    get_d_for_plot_offsets,
+    plot_offsets,
+    apply_offsets,
+    get_match_cosmos2020,
+)
+import multiprocessing
+from argparse import ArgumentParser
+
+log = get_logger()
+
+default_outdir = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "suprime",
+    "offsets",
+    "phot-redux-20230307",
+)
+default_photspecfn = os.path.join(
+    default_outdir,
+    "spec",
+    "cosmos-desi-thru20230416-cumulhpx-spectra-unq.fits",
+)
+default_tractorfn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "suprime",
+    "phot",
+    "Subaru_tractor_forced_all.fits.gz",
+)
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outdir",
+        help="output folder (default={})".format(default_outdir),
+        type=str,
+        default=default_outdir,
+    )
+    parser.add_argument(
+        "--step",
+        choices=["compute", "plot_star", "plot_laelbg", "plot_cosmos2020"],
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--photspecfn",
+        help="file with all unique objects observed in cosmos, match to Tractor suprime photometry (default={})".format(
+            default_photspecfn,
+        ),
+        type=str,
+        default=default_photspecfn,
+    )
+    parser.add_argument(
+        "--fkey",
+        help="Tractor column to use (default=FIBERTOTFLUX)",
+        choices=["FIBERTOTFLUX", "FIBERFLUX"],
+        type=str,
+        default="FIBERTOTFLUX",
+    )
+    parser.add_argument(
+        "--tractorfn",
+        help="Tractor file where we want to correct the offsets (default={})".format(
+            default_tractorfn
+        ),
+        type=str,
+        default=default_tractorfn,
+    )
+    parser.add_argument(
+        "--log-stdout",
+        "--log_stdout",
+        action="store_true",
+        help="log to stdout instead of redirecting to a file",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    return args
+
+
+def main():
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    # output files
+    outphotspecfn = args.photspecfn.replace(".fits", "-with-offsets.fits")
+    outoffsetsfn = os.path.join(args.outdir, "suprime-offsets.ecsv")
+
+    if args.step == "compute":
+
+        for fn in [outphotspecfn, outoffsetsfn]:
+            if (os.path.isfile(fn)) & (~args.overwrite):
+                msg = "{} exists and args.overwrite=False; exiting".format(fn)
+                log.error(msg)
+                raise ValueError(msg)
+
+        # read spec + tractor info; and merge
+        d = read_photspecfn(args.photspecfn)
+
+        # compute offsets + return enhanced catalog
+        d, d_offsets = get_offsets(d, args.fkey)
+
+        # write
+        log.info("write {}".format(outphotspecfn))
+        d.write(outphotspecfn, overwrite=args.overwrite)
+        log.info("write {}".format(outoffsetsfn))
+        d_offsets.write(outoffsetsfn, overwrite=args.overwrite)
+
+    if args.step == "plot_star":
+
+        outpngroot = os.path.join(
+            args.outdir,
+            "plots",
+            "suprime-offsets-star",
+        )
+
+        ccdnames = [None] + get_ccdnames().tolist() + ["all"]
+        d = get_d_for_plot_offsets(outphotspecfn, args.fkey, "star")
+        plot_offsets(d, outpngroot, ccdnames=ccdnames, sample_label="DESI stars")
+
+    if args.step == "plot_laelbg":
+
+        outpngroot = os.path.join(
+            args.outdir,
+            "plots",
+            "suprime-offsets-laelbg",
+        )
+
+        ccdnames = [None]
+        d = get_d_for_plot_offsets(outphotspecfn, args.fkey, "laelbg")
+        plot_offsets(d, outpngroot, ccdnames=ccdnames, sample_label="DESI LAE/LBG")
+
+    if args.step == "plot_cosmos2020":
+
+        outpngroot = os.path.join(
+            args.outdir,
+            "plots",
+            "suprime-offsets-cosmos2020",
+        )
+
+        ccdnames = [None]
+        for fmin, fmin_root in zip(
+            [1, 0.1],
+            ["", "-faint"],
+        ):
+            fmin_outpngroot = "{}{}".format(outpngroot, fmin_root)
+            d = get_match_cosmos2020(args.tractorfn, outoffsetsfn, fmin=fmin)
+            plot_offsets(
+                d, fmin_outpngroot, ccdnames=ccdnames, sample_label="COSMOS2020 stars"
+            )
+
+
+if __name__ == "__main__":
+
+    args = parse()
+
+    if args.step == "compute":
+
+        outfn = args.photspecfn.replace(".fits", "-with-offsets.fits")
+
+    if args.step not in ["compute"]:
+
+        main()
+
+    else:
+
+        outlog = outfn.replace(".fits", ".log")
+
+        if (os.path.isfile(outfn)) & (~args.overwrite):
+
+            msg = "{} exists and args.overwrite=False".format(outfn)
+            log.error(msg)
+            raise ValueError(msg)
+
+        if args.log_stdout:
+
+            main()
+
+        else:
+
+            with stdouterr_redirected(to=outlog):
+
+                main()

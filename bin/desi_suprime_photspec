@@ -1,0 +1,186 @@
+#!/usr/bin/env python
+
+import os
+import multiprocessing
+import numpy as np
+from astropy.table import Table, vstack
+from astropy.io import fits
+from desihizmerge.hizmerge_io import get_img_bands
+from desihizmerge.suprime_photspec_io import (
+    get_tractor_match,
+    process_fn,
+    build_hs,
+    get_unq_spectra,
+    build_unq_hs,
+)
+from desispec.spectra import stack as spectra_stack
+from desiutil.redirect import stdouterr_redirected
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+
+log = get_logger()
+
+default_outdir = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "suprime",
+    "offsets",
+    "phot-redux-20230307",
+)
+default_desicosmosfn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "cosmos",
+    "cosmos-desi-thru20230416-cumulhpx.fits",
+)
+default_tractorfn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "suprime",
+    "phot",
+    "Subaru_tractor_forced_all.fits.gz",
+)
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outdir",
+        help="output folder (default={})".format(default_outdir),
+        type=str,
+        default=default_outdir,
+    )
+    parser.add_argument(
+        "--step",
+        choices=["all", "unq"],
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--desicosmosfn",
+        help="file listing all desi observations in cosmos (default={})".format(
+            default_desicosmosfn
+        ),
+        type=str,
+        default=default_desicosmosfn,
+    )
+    parser.add_argument(
+        "--tractorfn",
+        help="tractor file name (default={})".format(default_tractorfn),
+        type=str,
+        default=default_tractorfn,
+    )
+    parser.add_argument(
+        "--numproc", help="number of parallel process (default=1)", type=int, default=1
+    )
+    parser.add_argument(
+        "--log-stdout",
+        "--log_stdout",
+        action="store_true",
+        help="log to stdout instead of redirecting to a file",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    for kwargs in args._get_kwargs():
+
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    return args
+
+
+def main():
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    bands = get_img_bands("suprime")
+
+    if args.step == "all":
+
+        d = Table.read(args.desicosmosfn)
+
+        # match to tractor
+        match_d, match_t = get_tractor_match(d, args.tractorfn)
+
+        rrfns = np.unique(match_d["FN"])
+        # loop on redrock files
+        myargs = [(match_d, match_t, rrfn, bands) for rrfn in rrfns]
+        pool = multiprocessing.Pool(processes=args.numproc)
+
+        with pool:
+
+            outputs = pool.starmap(process_fn, myargs)
+
+        ss = [output[0] for output in outputs]
+        ds = [output[1] for output in outputs]
+        ts = [output[2] for output in outputs]
+
+        s = spectra_stack(ss)
+        d = vstack(ds)
+        t = vstack(ts)
+        assert np.all(s.fibermap["TARGETID"] == d["TARGETID"])
+
+        hs = build_hs(s, d, t)
+
+        log.info("write {}".format(outfn))
+        hs.writeto(outfn, overwrite=args.overwrite)
+
+    if args.step == "unq":
+
+        h = fits.open(outfn.replace("-unq", "-all"))
+        d = Table(h["CUSTOM"].data)
+        t = Table(h["PHOTINFO"].data)
+        waves = h["BRZ_WAVE"].data
+        fluxs = h["BRZ_FLUX"].data
+        ivars = h["BRZ_IVAR"].data
+
+        unq_fluxs, unq_ivars, unq_d, unq_t = get_unq_spectra(
+            d, t, waves, fluxs, ivars, bands
+        )
+
+        hs = build_unq_hs(waves, unq_fluxs, unq_ivars, unq_d, unq_t)
+
+        log.info("write {}".format(outfn))
+        hs.writeto(outfn, overwrite=args.overwrite)
+
+
+if __name__ == "__main__":
+
+    args = parse()
+
+    outfn = os.path.join(
+        args.outdir,
+        os.path.basename(args.desicosmosfn).replace(
+            ".fits", "-spectra-{}.fits".format(args.step)
+        ),
+    )
+    log.info("outfn\t{}".format(outfn))
+
+    outlog = outfn.replace(".fits", ".log")
+
+    if (os.path.isfile(outfn)) & (~args.overwrite):
+
+        msg = "{} exists and args.overwrite=False".format(outfn)
+        log.error(msg)
+        raise ValueError(msg)
+
+    if args.log_stdout:
+
+        main()
+
+    else:
+
+        with stdouterr_redirected(to=outlog):
+
+            main()
