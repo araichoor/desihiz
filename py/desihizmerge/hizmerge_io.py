@@ -351,13 +351,13 @@ def get_cosmos2020_fn(case):
     return fn
 
 
-def get_clauds_fn(case, offset=False, uband="u"):
+def get_clauds_fn(case, v2=False, uband="u"):
     """
     Get the Desprez+23 CLAUDS SExtractor catalog full path
 
     Args:
         case: round of DESI observation (str)
-        offset (optional, defaults to False): if True, use custom catalogs
+        v2 (optional, defaults to False): if True, use custom catalogs
             with per-HSC pointing photometric offset on the Desprez+23 catalogs,
             (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
@@ -381,16 +381,16 @@ def get_clauds_fn(case, offset=False, uband="u"):
 
     field = case[:6]
 
-    if offset:
+    if v2:
 
-        offset_str = "-offset"
+        v2_str = "-offset"
 
     else:
 
-        offset_str = ""
+        v2_str = ""
 
     fn = os.path.join(
-        claudsdir, "{}_11bands-SExtractor-Lephare{}.fits".format(field.upper(), offset_str)
+        claudsdir, "{}_11bands-SExtractor-Lephare{}.fits".format(field.upper(), v2_str)
     )
 
     return fn
@@ -1282,7 +1282,7 @@ def get_expids(img, case):
     return d
 
 
-def get_phot_fns(img, case, band, photdir=None, offset=None):
+def get_phot_fns(img, case, band, photdir=None, v2=None):
     """
     Get the photometric tractor file name used for the target selection
 
@@ -1291,7 +1291,7 @@ def get_phot_fns(img, case, band, photdir=None, offset=None):
         case: round of DESI observation (str)
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
-        offset (optional, defaults to False): for img=clauds, if True, use custom catalogs
+        v2 (optional, defaults to False): for img=clauds, if True, use custom catalogs
             with per-HSC pointing photometric offset on the Desprez+23 catalogs,
             (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
@@ -1349,11 +1349,11 @@ def get_phot_fns(img, case, band, photdir=None, offset=None):
     if img == "clauds":
 
         mydict = {
-            "cosmos_yr1_UGR": [get_clauds_fn("cosmos_yr1", offset=offset, uband="u")],
-            "cosmos_yr1_GRI": [get_clauds_fn("cosmos_yr1", offset=offset, uband="u")],
-            "xmmlss_yr2_USGR": [get_clauds_fn("xmmlss_yr2", offset=offset, uband="uS")],
-            "cosmos_yr2_UGR": [get_clauds_fn("cosmos_yr2", offset=offset, uband="u")],
-            "cosmos_yr2_USGR": [get_clauds_fn("cosmos_yr2", offset=offset, uband="uS")],
+            "cosmos_yr1_UGR": [get_clauds_fn("cosmos_yr1", v2=v2, uband="u")],
+            "cosmos_yr1_GRI": [get_clauds_fn("cosmos_yr1", v2=v2, uband="u")],
+            "xmmlss_yr2_USGR": [get_clauds_fn("xmmlss_yr2", v2=v2, uband="uS")],
+            "cosmos_yr2_UGR": [get_clauds_fn("cosmos_yr2", v2=v2, uband="u")],
+            "cosmos_yr2_USGR": [get_clauds_fn("cosmos_yr2", v2=v2, uband="uS")],
         }
 
     if "{}_{}".format(case, band) in mydict:
@@ -1486,7 +1486,7 @@ def get_phot_init_table(img, n):
     return t
 
 
-def get_phot_table(img, case, specinfo_table, photdir, offset=False):
+def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     """
     Get the photometric information for a given {img, case}
 
@@ -1496,7 +1496,7 @@ def get_phot_table(img, case, specinfo_table, photdir, offset=False):
         specinfo_table: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
-        offset (optional, defaults to False): for img=clauds, if True, use custom catalogs
+        v2 (optional, defaults to False): for img=clauds, if True, use custom catalogs
             with per-HSC pointing photometric offset on the Desprez+23 catalogs,
             (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
@@ -1540,7 +1540,7 @@ def get_phot_table(img, case, specinfo_table, photdir, offset=False):
 
         from desihizmerge.hizmerge_clauds import get_clauds_phot_infos
 
-        d["ID"], d["FILENAME"] = get_clauds_phot_infos(case, specinfo_table, photdir, offset=offset)
+        d["ID"], d["FILENAME"] = get_clauds_phot_infos(case, specinfo_table, photdir, v2=v2)
 
     # propagating columns from specinfo_table
     keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]
@@ -1964,7 +1964,7 @@ def get_spec_table(img, case, stack_s, mydict):
     return d
 
 
-def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
+def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_v2_ds, exps_ds):
     """
     Stacks results from the different cases
 
@@ -1974,7 +1974,7 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
         spec_ds: list of NCASE specinfo tables from get_spec_table() (list of arrays)
         phot_ds: list of NCASE photinfo tables from get_phot_table()
             is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
-        phot_offset_ds: same as phot_ds, but for phot. with offsets;
+        phot_v2_ds: same as phot_ds, but for phot. with offsets;
             is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_ds: list of NCASE exps tables from get_expids() (list of arrays)
 
@@ -1982,7 +1982,7 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
         stack_s: stack of stack_ss
         spec_d: stack of spec_ds
         phot_d: stack of phot_ds
-        phot_offset_d: stack of phot_offset_ds for clauds; None otherwise
+        phot_v2_d: stack of phot_offset_ds for clauds; None otherwise
         exps_d: stack exps_ds
     """
     # stack_s
@@ -2008,21 +2008,21 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
         phot_d = vstack([phot_ds[case] for case in cases])
 
     # phot_offset_ds
-    if phot_offset_ds is None:
+    if phot_v2_ds is None:
 
-        phot_offset_d = None
+        phot_v2_d = None
 
     else:
 
-        assert np.all(cases == list(phot_offset_ds.keys()))
+        assert np.all(cases == list(phot_v2_ds.keys()))
 
-        if np.sum([phot_offset_ds[case] is None for case in cases]) == len(phot_offset_ds):
+        if np.sum([phot_v2_ds[case] is None for case in cases]) == len(phot_v2_ds):
 
-            phot_offset_d = None
+            phot_v2_d = None
 
         else:
 
-            phot_offset_d = vstack([phot_offset_ds[case] for case in cases])
+            phot_v2_d = vstack([phot_v2_ds[case] for case in cases])
 
     # expids_ds
     assert np.all(cases == list(exps_ds.keys()))
@@ -2030,7 +2030,7 @@ def merge_cases(img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds):
 
     # TODO: handle possible duplicates?
 
-    return stack_s, spec_d, phot_d, phot_offset_d, exps_d
+    return stack_s, spec_d, phot_d, phot_v2_d, exps_d
 
 
 def build_hs(
@@ -2039,7 +2039,7 @@ def build_hs(
     stack_s,
     spec_d,
     phot_d,
-    phot_offset_d,
+    phot_v2_d,
     exps_d,
 ):
     """
@@ -2052,7 +2052,7 @@ def build_hs(
         spec_d: specinfo table from get_spec_table() (list of arrays)
         phot_d: photinfo table from get_phot_table()
             is relevant for LAE/LBG; if dealing with --stdsky, then set to None (list of arrays or None)
-        phot_offset_d: as phot_d, but for phot. with offset; relevant only for clauds; otherwise
+        phot_v2_d: as phot_d, but for phot. with offset; relevant only for clauds; otherwise
             is relevant for clauds only; otherwise just set it to None (list of arrays or None)
         exp_d: exps table from get_expids() (list of arrays)
 
@@ -2114,10 +2114,10 @@ def build_hs(
         ds.append(phot_d)
         extnames.append("PHOTINFO")
 
-    if phot_offset_d is not None:
+    if phot_v2_d is not None:
 
-        ds.append(phot_offset_d)
-        extnames.append("PHOTOFFINFO")
+        ds.append(phot_v2_d)
+        extnames.append("PHOTV2INFO")
 
     ds.append(exps_d)
     extnames.append("EXPIDS")
@@ -2142,8 +2142,8 @@ def build_hs(
             fns, _, _, _ = get_vi_fns(img)
             h.header["VIFNS"] = ",".join(fns)
 
-        # PHOTINFO, PHOTOFFINFO: cases, ext. coeffs (a bit hacky...), zphot fns
-        if extname in ["PHOTINFO", "PHOTOFFINFO"]:
+        # PHOTINFO, PHOTV2INFO: cases, ext. coeffs (a bit hacky...), zphot fns
+        if extname in ["PHOTINFO", "PHOTV2INFO"]:
 
             exts = get_ext_coeffs(img)
             h.header.append(

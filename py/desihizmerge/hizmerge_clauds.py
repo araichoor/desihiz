@@ -202,7 +202,7 @@ def get_clauds_cosmos_yr2_lbgnew_u_or_us_tids():
     for uband in ["u", "uS"]:
 
         # read phot. catalog + cut on the ugr or uSgr targets
-        pfn = get_clauds_fn("cosmos_yr2", offset=True, uband=uband)
+        pfn = get_clauds_fn("cosmos_yr2", v2=True, uband=uband)
         p = fitsio.read(pfn)
         # mimick what was done for clauds-sext-cosmos-{u,uS}gr-r25.fits
         sel = p["MASK"] == 0
@@ -373,7 +373,7 @@ def get_clauds_cosmos_yr2_infos():
 # get photometry infos (clauds_id)
 # this is for clauds targets only
 # sky/std will have dummy values
-def get_clauds_phot_infos(case, d, photdir=None, offset=None):
+def get_clauds_phot_infos(case, d, photdir=None, v2=None):
     """
     Get the photometric information (TARGETID, ID) for a given case
 
@@ -382,7 +382,7 @@ def get_clauds_phot_infos(case, d, photdir=None, offset=None):
         d: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
-        offset (optional, defaults to False): for img=clauds, if True, use custom catalogs
+        v2 (optional, defaults to False): for img=clauds, if True, use custom catalogs
             with per-HSC pointing photometric offset on the Desprez+23 catalogs,
             (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
@@ -405,7 +405,7 @@ def get_clauds_phot_infos(case, d, photdir=None, offset=None):
     for band in bands:
 
         ii_band = np.where(d[band])[0]
-        fns = get_phot_fns("clauds", case, band, photdir=photdir, offset=offset)
+        fns = get_phot_fns("clauds", case, band, photdir=photdir, v2=v2)
         log.info("{}\t{}\t{}\t{}".format(case, band, ii_band.size, fns))
 
         # is that band relevant for that case?
