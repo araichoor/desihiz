@@ -109,7 +109,7 @@ def main():
         phot_ds = None
     else:
         phot_ds = {}
-    if (args.img == "clauds") & (not args.stdsky):
+    if (args.img in ["suprime", "clauds"]) & (not args.stdsky):
         phot_v2_ds = {}
     else:
         phot_v2_ds = None
@@ -118,10 +118,12 @@ def main():
     for case in args.cases:
 
         # get the infos (TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION)
+        # suprime_v2 case:
+        #   the second version of the catalogs can have different brickname, objd, ra, dec
         # clauds_v2 case:
-        #   as the "official" and offset catalogs are row-matched
-        #   there is no need to distinguish for the get_img_infos()
-        #   which does not know about the photometry
+        #   the "official" and offset catalogs are row-matched, so same (ra, dec)
+        # here the PHOT_RA, PHOT_DEC is what comes from the target catalogs
+        #   so there is no need to distinguish for the get_img_infos()
         mydicts[case] = get_img_infos(args.img, case, args.stdsky)
         # remark:
         #   for odin cosmos_yr2, n419 and n501 have 6 duplicates...
@@ -149,7 +151,7 @@ def main():
             phot_ds[case] = get_phot_table(
                 args.img, case, spec_ds[case], photdir=photdir
             )
-            if args.img == "clauds":
+            if phot_v2_ds is not None:
                 phot_v2_ds[case] = get_phot_table(
                     args.img, case, spec_ds[case], photdir=photdir, v2=True
                 )

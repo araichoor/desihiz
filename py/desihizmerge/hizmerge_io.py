@@ -140,6 +140,7 @@ def get_bb_img(fn):
         "tractor-xmm-N419-hsc-forced.fits",
         "ODIN_N419_tractor_HSC_forced_all.fits.gz",
         "Subaru_tractor_forced_all.fits.gz",
+        "Subaru_tractor_forced_all-redux-20231025.fits",
     ]:
 
         bb_img = "HSC"
@@ -762,7 +763,10 @@ def read_targfn(targfn):
                 )
 
     # SUPRIME: fix/homogenize some column names
-    if basename == "Subaru_tractor_forced_all.fits.gz":
+    if basename in [
+        "Subaru_tractor_forced_all.fits.gz",
+        "Subaru_tractor_forced_all-redux-20231025.fits",
+    ]:
 
         for band in get_img_bands("suprime"):
             oldroot, newroot = "I_A_L{}".format(band[1:]), band
@@ -1291,8 +1295,9 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
         case: round of DESI observation (str)
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
-        v2 (optional, defaults to False): for img=clauds, if True, use custom catalogs
-            with per-HSC pointing photometric offset on the Desprez+23 catalogs,
+        v2 (optional, defaults to False): for img=suprime, clauds, if True, use custom catalogs
+            - suprime: Dustin's rerun from 20231025
+            - clauds: with per-HSC pointing photometric offset on the Desprez+23 catalogs,
             (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
 
@@ -1338,9 +1343,16 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
     # suprime
     if img == "suprime":
 
+        if v2:
+
+            basefn = "Subaru_tractor_forced_all-redux-20231025.fits"
+
+        else:
+
+            basefn = "Subaru_tractor_forced_all.fits.gz"
         mydict = {
             "cosmos_yr2_{}".format(band): [
-                os.path.join(photdir, "Subaru_tractor_forced_all.fits.gz")
+                os.path.join(photdir, basefn)
             ]
             for band in get_img_bands("suprime")
         }
@@ -1496,9 +1508,11 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         specinfo_table: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
-        v2 (optional, defaults to False): for img=clauds, if True, use custom catalogs
-            with per-HSC pointing photometric offset on the Desprez+23 catalogs,
-            (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
+        v2 (optional, defaults to False): for img=suprime or clauds, if True,
+            use custom catalogs
+            - suprime: Dustin's rerun from 20231025
+            - clauds: with per-HSC pointing photometric offset on the Desprez+23 catalogs,
+                (see https://desi.lbl.gov/DocDB/cgi-bin/private/ShowDocument?docid=7493)
             (bool)
 
     Returns:
@@ -1533,7 +1547,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         from desihizmerge.hizmerge_suprime import get_suprime_phot_infos
 
         d["BRICKNAME"], d["OBJID"], d["FILENAME"] = get_suprime_phot_infos(
-            case, specinfo_table, photdir
+            case, specinfo_table, photdir, v2=v2
         )
 
     if img == "clauds":
