@@ -795,7 +795,6 @@ def read_targfn(targfn):
                         )
                     )
 
-
     # CLAUDS:
     # - homogenize some column names (EBV)
     # - convert ext.corr-mags and magerr to nanomaggies
@@ -818,8 +817,8 @@ def read_targfn(targfn):
         for band in ["U", "US", "G", "R", "I", "Z", "Y"]:
 
             # initializing with non-valid photometry values
-            p["FLUX_{}".format(band)] = -99.
-            p["FLUX_IVAR_{}".format(band)] = 0.
+            p["FLUX_{}".format(band)] = -99.0
+            p["FLUX_IVAR_{}".format(band)] = 0.0
             # re-include gal. extinction
             mags = p[band] + get_ext_coeffs("clauds")["CLAUDS"][band] * p["EBV"]
             # valid values
@@ -827,8 +826,11 @@ def read_targfn(targfn):
             # flux and flux_ivar in nanomaggies
             p["FLUX_{}".format(band)][sel] = 10 ** (-0.4 * (mags[sel] - 22.5))
             p["FLUX_IVAR_{}".format(band)][sel] = (
-                np.log(10) / 2.5 * p["{}_ERR".format(band)][sel] * p["FLUX_{}".format(band)][sel]
-            ) ** -2.
+                np.log(10)
+                / 2.5
+                * p["{}_ERR".format(band)][sel]
+                * p["FLUX_{}".format(band)][sel]
+            ) ** -2.0
             log.info(
                 "{}: convert {} and {}_ERR to (reddened) FLUX_{} (nanomaggies) and FLUX_IVAR_{}".format(
                     basename, band, band, band, band
@@ -843,9 +845,7 @@ def read_targfn(targfn):
 
         p.remove_column("FLAG_FIELD_BINARY")
         log.info(
-            "{}: remove FLAG_FIELD_BINARY, add FLAG_FIELD_BINARY_INT".format(
-                basename
-            )
+            "{}: remove FLAG_FIELD_BINARY, add FLAG_FIELD_BINARY_INT".format(basename)
         )
 
     log.info("{} colnames: {}".format(basename, ", ".join(p.colnames)))
@@ -1351,9 +1351,7 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
 
             basefn = "Subaru_tractor_forced_all.fits.gz"
         mydict = {
-            "cosmos_yr2_{}".format(band): [
-                os.path.join(photdir, basefn)
-            ]
+            "cosmos_yr2_{}".format(band): [os.path.join(photdir, basefn)]
             for band in get_img_bands("suprime")
         }
 
@@ -1554,7 +1552,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
         from desihizmerge.hizmerge_clauds import get_clauds_phot_infos
 
-        d["ID"], d["FILENAME"] = get_clauds_phot_infos(case, specinfo_table, photdir, v2=v2)
+        d["ID"], d["FILENAME"] = get_clauds_phot_infos(
+            case, specinfo_table, photdir, v2=v2
+        )
 
     # propagating columns from specinfo_table
     keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]

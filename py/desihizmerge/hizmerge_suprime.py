@@ -247,7 +247,7 @@ def get_suprime_cosmos_yr2_infos():
 # get photometry infos (targetid, brickname, objid)
 # this is for suprime targets only
 # sky/std will have dummy values
-def get_suprime_phot_infos(case, d, photdir=None,v2=False):
+def get_suprime_phot_infos(case, d, photdir=None, v2=False):
     """
     Get the photometric information (TARGETID, BRICKNAME, OBJID) for a given case
 
@@ -355,9 +355,9 @@ def get_suprime_phot_infos(case, d, photdir=None,v2=False):
                             case, band, sel_diff.sum(), d2d.size
                         )
                     )
-                    tertiary_targets = d["TERTIARY_TARGET"][ii_band][iid][sel_diff].astype(
-                        str
-                    )
+                    tertiary_targets = d["TERTIARY_TARGET"][ii_band][iid][
+                        sel_diff
+                    ].astype(str)
 
                     phot_sels = d["PHOT_SELECTION"][ii_band][iid][sel_diff].astype(str)
                     phot_sels = np.array(
@@ -374,7 +374,9 @@ def get_suprime_phot_infos(case, d, photdir=None,v2=False):
                         phot_sels != "LAE IA{}".format(band)
                     )
 
-                    log.info("tertiary_targets\t= {}".format(", ".join(tertiary_targets)))
+                    log.info(
+                        "tertiary_targets\t= {}".format(", ".join(tertiary_targets))
+                    )
                     log.info(
                         "is_lowerprio_fa\t= {}".format(
                             ", ".join(is_lowerprio_fa.astype(str))
@@ -382,7 +384,9 @@ def get_suprime_phot_infos(case, d, photdir=None,v2=False):
                     )
                     log.info("phot_sels\t= {}".format(", ".join(phot_sels)))
                     log.info(
-                        "is_lowerprio_ad= {}".format(", ".join(is_lowerprio_ad.astype(str)))
+                        "is_lowerprio_ad= {}".format(
+                            ", ".join(is_lowerprio_ad.astype(str))
+                        )
                     )
                     log.info(
                         "{}\t{}\tlowerprio_fa={}\tlowerprio_ad={}\tlowerprio_faxtlowerprio_ad={}".format(
@@ -407,11 +411,11 @@ def get_suprime_phot_infos(case, d, photdir=None,v2=False):
         if v2:
 
             n_nomatch = {
-                "I427" : 6,
-                "I464" : 27,
-                "I484" : 9,
-                "I505" : 18,
-                "I527" : 0,
+                "I427": 6,
+                "I464": 27,
+                "I484": 9,
+                "I505": 18,
+                "I527": 0,
             }[band]
 
         else:
@@ -427,8 +431,6 @@ def get_suprime_phot_infos(case, d, photdir=None,v2=False):
                 d[band].sum(),
             )
         )
-        assert (
-            (d[band]) & (bricknames == empty_brickname)
-        ).sum() == n_nomatch
+        assert ((d[band]) & (bricknames == empty_brickname)).sum() == n_nomatch
 
     return bricknames, objids, targfns
