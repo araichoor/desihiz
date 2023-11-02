@@ -109,19 +109,21 @@ def main():
         phot_ds = None
     else:
         phot_ds = {}
-    if (args.img == "clauds") & (not args.stdsky):
-        phot_offset_ds = {}
+    if (args.img in ["suprime", "clauds"]) & (not args.stdsky):
+        phot_v2_ds = {}
     else:
-        phot_offset_ds = None
+        phot_v2_ds = None
     exps_ds = {}
 
     for case in args.cases:
 
         # get the infos (TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION)
-        # clauds-offset case:
-        #   as the "official" and offset catalogs are row-matched
-        #   there is no need to distinguish for the get_img_infos()
-        #   which does not know about the photometry
+        # suprime_v2 case:
+        #   the second version of the catalogs can have different brickname, objd, ra, dec
+        # clauds_v2 case:
+        #   the "official" and offset catalogs are row-matched, so same (ra, dec)
+        # here the PHOT_RA, PHOT_DEC is what comes from the target catalogs
+        #   so there is no need to distinguish for the get_img_infos()
         mydicts[case] = get_img_infos(args.img, case, args.stdsky)
         # remark:
         #   for odin cosmos_yr2, n419 and n501 have 6 duplicates...
@@ -149,9 +151,9 @@ def main():
             phot_ds[case] = get_phot_table(
                 args.img, case, spec_ds[case], photdir=photdir
             )
-            if args.img == "clauds":
-                phot_offset_ds[case] = get_phot_table(
-                    args.img, case, spec_ds[case], photdir=photdir, offset=True
+            if phot_v2_ds is not None:
+                phot_v2_ds[case] = get_phot_table(
+                    args.img, case, spec_ds[case], photdir=photdir, v2=True
                 )
 
         # expids table
@@ -162,12 +164,12 @@ def main():
         spec_ds[case].remove_columns(["PHOT_RA", "PHOT_DEC"])
 
     # now merge the cases
-    stack_s, spec_d, phot_d, phot_offset_d, exps_d = merge_cases(
-        args.img, stack_ss, spec_ds, phot_ds, phot_offset_ds, exps_ds
+    stack_s, spec_d, phot_d, phot_v2_d, exps_d = merge_cases(
+        args.img, stack_ss, spec_ds, phot_ds, phot_v2_ds, exps_ds
     )
 
     # build hs
-    hs = build_hs(args.img, args.cases, stack_s, spec_d, phot_d, phot_offset_d, exps_d)
+    hs = build_hs(args.img, args.cases, stack_s, spec_d, phot_d, phot_v2_d, exps_d)
 
     # write
     log.info("write {}".format(args.outfn))

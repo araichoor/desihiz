@@ -247,7 +247,7 @@ def get_suprime_cosmos_yr2_infos():
 # get photometry infos (targetid, brickname, objid)
 # this is for suprime targets only
 # sky/std will have dummy values
-def get_suprime_phot_infos(case, d, photdir=None):
+def get_suprime_phot_infos(case, d, photdir=None, v2=False):
     """
     Get the photometric information (TARGETID, BRICKNAME, OBJID) for a given case
 
@@ -256,6 +256,8 @@ def get_suprime_phot_infos(case, d, photdir=None):
         d: output of the get_spec_table() function
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
+        v2 (optional, default to False): if True, then use Dustin's rerun from 20231025
+            (bool)
     """
     if photdir == None:
 
@@ -264,7 +266,9 @@ def get_suprime_phot_infos(case, d, photdir=None):
     # initialize columns we will fill
     bricknames = np.zeros(len(d), dtype="S8")
     objids = np.zeros(len(d), dtype=int)
-    targfns = np.zeros(len(d), dtype="S100")
+    targfns = np.zeros(len(d), dtype="S150")
+
+    empty_brickname = bricknames[0]
 
     # now get the per-band phot. infos
     bands = get_img_bands("suprime")
@@ -272,7 +276,7 @@ def get_suprime_phot_infos(case, d, photdir=None):
     for band in bands:
 
         ii_band = np.where(d[band])[0]
-        fns = get_phot_fns("suprime", case, band, photdir=photdir)
+        fns = get_phot_fns("suprime", case, band, photdir=photdir, v2=v2)
         log.info("{}\t{}\t{}\t{}".format(case, band, ii_band.size, fns))
 
         # is that band relevant for that case?
@@ -285,7 +289,7 @@ def get_suprime_phot_infos(case, d, photdir=None):
             # indexes:
             # - targets selected with that band
             # - not dealt with yet (by previous fn)
-            sel = (d[band]) & (bricknames == np.zeros(1, dtype="S8")[0])
+            sel = (d[band]) & (bricknames == empty_brickname)
             ii_band = np.where(sel)[0]
             log.info(
                 "{}\t{}\t{}\t{}/{} targets not dealt with yet".format(
@@ -322,60 +326,78 @@ def get_suprime_phot_infos(case, d, photdir=None):
                 )
             )
 
+            # if v2=False:
             # we expect to have a "perfect" match, except when:
             # - djs+ad targets: a higher-priority tertiary26 sample drove the (ra, dec)
             #   at the fiberassign tertiary step (identified with TERTIARY_TARGET)
             # - ad targets: when a ad higher-priority sample drove the (ra, dec)
             #   at the input target catalog creation (identified with PHOT_SELECTION_
             # - djs targets: those are "pure" suprime tractor (ra, dec)
-            sel_diff = d2d != 0
+            # if v2=True:
+            # we are comparing to rerun tractor catalogs, so the (ra, dec) will not
+            #   be an exact matching
+            # in addition some targets are not matched:
+            # - I427: 6/260
+            # - I464: 27/67
+            # - I484: 9/420
+            # - I505: 18/407
+            # - I527: 0/98
+            # for those, we let the bricknames, objids, targfns empty
 
-            if sel_diff.sum() != 0:
+            if not v2:
 
-                log.info(
-                    "{}\t{}\tlooking at {}/{} rows with d2d!=0".format(
-                        case, band, sel_diff.sum(), d2d.size
+                sel_diff = d2d != 0
+
+                if sel_diff.sum() != 0:
+
+                    log.info(
+                        "{}\t{}\tlooking at {}/{} rows with d2d!=0".format(
+                            case, band, sel_diff.sum(), d2d.size
+                        )
                     )
-                )
-                tertiary_targets = d["TERTIARY_TARGET"][ii_band][iid][sel_diff].astype(
-                    str
-                )
+                    tertiary_targets = d["TERTIARY_TARGET"][ii_band][iid][
+                        sel_diff
+                    ].astype(str)
 
-                phot_sels = d["PHOT_SELECTION"][ii_band][iid][sel_diff].astype(str)
-                phot_sels = np.array(
-                    [_.split(";")[0].strip() for _ in phot_sels]
-                )  # keep the first selection
+                    phot_sels = d["PHOT_SELECTION"][ii_band][iid][sel_diff].astype(str)
+                    phot_sels = np.array(
+                        [_.split(";")[0].strip() for _ in phot_sels]
+                    )  # keep the first selection
 
-                is_lowerprio_fa = (
-                    (tertiary_targets == "LBG_HYPHQ")
-                    | (tertiary_targets == "LBG_HYP")
-                    | (tertiary_targets == "LBG_Z2")
-                )
-
-                is_lowerprio_ad = np.array([_[:4] != "DJS_" for _ in phot_sels]) & (
-                    phot_sels != "LAE IA{}".format(band)
-                )
-
-                log.info("tertiary_targets\t= {}".format(", ".join(tertiary_targets)))
-                log.info(
-                    "is_lowerprio_fa\t= {}".format(
-                        ", ".join(is_lowerprio_fa.astype(str))
+                    is_lowerprio_fa = (
+                        (tertiary_targets == "LBG_HYPHQ")
+                        | (tertiary_targets == "LBG_HYP")
+                        | (tertiary_targets == "LBG_Z2")
                     )
-                )
-                log.info("phot_sels\t= {}".format(", ".join(phot_sels)))
-                log.info(
-                    "is_lowerprio_ad= {}".format(", ".join(is_lowerprio_ad.astype(str)))
-                )
-                log.info(
-                    "{}\t{}\tlowerprio_fa={}\tlowerprio_ad={}\tlowerprio_faxtlowerprio_ad={}".format(
-                        case,
-                        band,
-                        is_lowerprio_fa.sum(),
-                        is_lowerprio_ad.sum(),
-                        ((is_lowerprio_fa) & (is_lowerprio_ad)).sum(),
+
+                    is_lowerprio_ad = np.array([_[:4] != "DJS_" for _ in phot_sels]) & (
+                        phot_sels != "LAE IA{}".format(band)
                     )
-                )
-                assert np.all((is_lowerprio_fa) | (is_lowerprio_ad))
+
+                    log.info(
+                        "tertiary_targets\t= {}".format(", ".join(tertiary_targets))
+                    )
+                    log.info(
+                        "is_lowerprio_fa\t= {}".format(
+                            ", ".join(is_lowerprio_fa.astype(str))
+                        )
+                    )
+                    log.info("phot_sels\t= {}".format(", ".join(phot_sels)))
+                    log.info(
+                        "is_lowerprio_ad= {}".format(
+                            ", ".join(is_lowerprio_ad.astype(str))
+                        )
+                    )
+                    log.info(
+                        "{}\t{}\tlowerprio_fa={}\tlowerprio_ad={}\tlowerprio_faxtlowerprio_ad={}".format(
+                            case,
+                            band,
+                            is_lowerprio_fa.sum(),
+                            is_lowerprio_ad.sum(),
+                            ((is_lowerprio_fa) & (is_lowerprio_ad)).sum(),
+                        )
+                    )
+                    assert np.all((is_lowerprio_fa) | (is_lowerprio_ad))
 
             # fill the values
             iid = ii_band[iid]
@@ -383,13 +405,32 @@ def get_suprime_phot_infos(case, d, photdir=None):
             objids[iid] = t["OBJID"][iit]
             targfns[iid] = fn
 
-        # verify all objects are matched
-        print(band, d[band].sum())
-        print(
-            ((d[band]) & (bricknames.astype(str) == np.zeros(1, dtype="S8")[0])).sum()
+        # not_v2 : verify all objects are matched
+        # v2 : verify the expected non-matched
+
+        if v2:
+
+            n_nomatch = {
+                "I427": 6,
+                "I464": 27,
+                "I484": 9,
+                "I505": 18,
+                "I527": 0,
+            }[band]
+
+        else:
+
+            n_nomatch = 0
+
+        log.info(
+            "{}\t{}\tv2={}\texpected no_match: {}/{}".format(
+                case,
+                band,
+                v2,
+                n_nomatch,
+                d[band].sum(),
+            )
         )
-        assert (
-            (d[band]) & (bricknames.astype(str) == np.zeros(1, dtype="S8")[0])
-        ).sum() == 0
+        assert ((d[band]) & (bricknames == empty_brickname)).sum() == n_nomatch
 
     return bricknames, objids, targfns
