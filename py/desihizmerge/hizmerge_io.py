@@ -417,8 +417,8 @@ def get_vi_fns(img):
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "odin", "vi"
         )
         fns = [
-            os.path.join(mydir, "FINAL_VI_ODIN_N501_20230921.fits"),
-            os.path.join(mydir, "FINAL_VI_ODIN_N419_20231002.fits"),
+            os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
+            os.path.join(mydir, "FINAL_VI_ODIN_N419_20231030.fits"),
         ]
 
     if img == "suprime":
