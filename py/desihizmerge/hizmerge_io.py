@@ -409,15 +409,17 @@ def get_vi_fns(img):
     """
     assert img in allowed_imgs
 
-    fn, tidkey, zkey, qualkey = None, None, None, None
+    fn = None
 
     if img == "odin":
 
         mydir = os.path.join(
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "odin", "vi"
         )
-        fns = [os.path.join(mydir, "FINAL_VI_ODIN_N501_v20230913.fits")]
-        tidkey, zkey, qualkey = "VI_TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL"
+        fns = [
+            os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
+            os.path.join(mydir, "FINAL_VI_ODIN_N419_20231114.fits"),
+        ]
 
     if img == "suprime":
 
@@ -425,17 +427,76 @@ def get_vi_fns(img):
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "suprime", "vi"
         )
         fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz")]
-        tidkey, zkey, qualkey = "TARGETID", "VI_Z_FINAL", "VI_QUALITY_FINAL"
 
     if img == "clauds":
 
         mydir = os.path.join(
             os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "clauds", "vi"
         )
-        fns = [os.path.join(mydir, "vi-80871-merged.fits")]
-        tidkey, zkey, qualkey = "TARGETID", "VI_Z", "VI_QUALITY"
+        fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V3.ecsv")]
 
-    return fns, tidkey, zkey, qualkey
+    return fns
+
+
+def read_vi_fn(fn):
+    """
+    Read a VI catalog, and execute few commands to clean/homogenize.
+
+    Args:
+        fn: full path to the VI file (str)
+
+    Returns:
+        d: astropy Table()
+    """
+
+    basename = os.path.basename(fn)
+
+    if basename.split(os.path.extsep)[-1] == "ecsv":
+        d = Table.read(fn)
+    else:
+        d = Table(fitsio.read(fn))
+    log.info("{}\t: read {} rows".format(basename, len(d)))
+
+    # expected file names per img
+    basenames = {
+        img : [os.path.basename(_) for _ in get_vi_fns(img)]
+        for img in allowed_imgs
+    }
+
+    # odin, suprime
+    # - suprime: add dummy VI_SPECTYPE_FINAL
+    # - rename columns
+    if (basename in basenames["odin"]) | (basename in basenames["suprime"]):
+        key_olds = ["VI_Z_FINAL", "VI_QUALITY_FINAL", "VI_SPECTYPE_FINAL", "VI_COMMENTS_FINAL"]
+        key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
+        if basename in basenames["odin"]:
+            key_olds = ["VI_TARGETID"] + key_olds
+            key_news = ["TARGETID"] + key_news
+        if basename in basenames["suprime"]:
+            d["VI_SPECTYPE_FINAL"] = np.zeros(len(d), dtype="<U10")
+            log.info("{}\t: add dummy VI_SPECTYPE_FINAL".format(basename))
+        for key_old, key_new in zip(key_olds, key_news):
+            d[key_old].name = key_new
+            log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
+
+    # clauds
+    # - remove duplicates
+    # - rename columns
+    if basename in basenames["clauds"]:
+        sel = d["DUPL"] != "d"
+        log.info("{}\t: remove {} duplicates".format(basename, (~sel).sum()))
+        d = d[sel]
+        for key_old, key_new in zip(
+            ["VI_quality", "VI_z", "VI_spectype", "VI_comment"],
+            ["VI_QUALITY", "VI_Z", "VI_SPECTYPE", "VI_COMMENTS"],
+        ):
+            d[key_old].name = key_new
+            log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
+
+    # we want no duplicates at this point
+    assert np.unique(d["TARGETID"]).size == len(d)
+
+    return d
 
 
 def mtime_infos(fn):
@@ -1937,6 +1998,8 @@ def get_spec_table(img, case, stack_s, mydict):
     d["VI"] = np.zeros(len(d), dtype=bool)
     d["VI_Z"] = np.nan + np.zeros(len(d), dtype=">f4")
     d["VI_QUALITY"] = np.nan + np.zeros(len(d), dtype=">f4")
+    d["VI_SPECTYPE"] = np.zeros(len(d), dtype="<U10")
+    d["VI_COMMENTS"] = np.zeros(len(d), dtype="<U450")
     only_stdsky = ((d["STD"]) | (d["SKY"])).sum() == len(d)
 
     if only_stdsky:
@@ -1954,33 +2017,33 @@ def get_spec_table(img, case, stack_s, mydict):
 
         iibands = np.where(sel)[0]
         #
-        fns, tidkey, zkey, qualkey = get_vi_fns(img)
+        fns = get_vi_fns(img)
         log.info("vi_fns = {}".format(", ".join(fns)))
 
         if fns is not None:
 
             for fn in fns:
 
-                vi = Table(fitsio.read(fn))
+                vi = read_vi_fn(fn)
 
-                # loop to handle possible duplicates...
+                # we beforehand removed possible duplicates in the vi catalog
                 for iiband in iibands:
 
-                    iivi = np.where(vi[tidkey] == d["TARGETID"][iiband])[0]
+                    iivi = np.where(vi["TARGETID"] == d["TARGETID"][iiband])[0]
 
                     if iivi.size == 1:
 
                         d["VI"][iiband] = True
-                        d["VI_Z"][iiband] = vi[zkey][iivi[0]]
-                        d["VI_QUALITY"][iiband] = vi[qualkey][iivi[0]]
+                        for key in ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]:
+                            d[key][iiband] = vi[key][iivi[0]]
 
                     if iivi.size > 1:
 
-                        log.warning(
-                            "TARGETID={} appears {} times in {}".format(
-                                d["TARGETID"][iiband], ii.size, os.path.basename(fn)
-                            )
+                        msg = "TARGETID={} appears {} times in {}".format(
+                            d["TARGETID"][iiband], ii.size, os.path.basename(fn)
                         )
+                        log.error(msg)
+                        raise ValueError(msg)
 
                 log.info("{} has {} rows".format(os.path.basename(fn), len(vi)))
                 log.info(
@@ -2167,7 +2230,7 @@ def build_hs(
             )
             h.header["CASES"] = ",".join(cases)
             h.header["SPECDIRS"] = ",".join([get_specdir(img, case) for case in cases])
-            fns, _, _, _ = get_vi_fns(img)
+            fns = get_vi_fns(img)
             h.header["VIFNS"] = ",".join(fns)
 
         # PHOTINFO, PHOTV2INFO: cases, ext. coeffs (a bit hacky...), zphot fns
