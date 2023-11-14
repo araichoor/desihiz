@@ -730,18 +730,23 @@ def read_targfn(targfn):
         "LAE_Candidates_NB673_v0_targeting.fits.gz",
     ]:
 
+        old_roots = ["FORCED_MEAN_FLUX"]
+        new_roots = ["FLUX"]
+
         for key in p.colnames:
 
-            if "FORCED_MEAN_FLUX" in key:
+            for old_root, new_root in zip(old_roots, new_roots):
 
-                p[key].name = key.replace("FORCED_MEAN_FLUX", "FLUX")
-                log.info(
-                    "{}:\trename {} to {}".format(
-                        basename,
-                        key,
-                        key.replace("FORCED_MEAN_FLUX", "FLUX"),
+                if old_root in key:
+
+                    p[key].name = key.replace(old_root, new_root)
+                    log.info(
+                        "{}:\trename {} to {}".format(
+                            basename,
+                            key,
+                            key.replace(old_root, new_root),
+                        )
                     )
-                )
 
     if basename in [
         "ODIN_N419_tractor_DR10_forced_all.fits.gz",
@@ -749,18 +754,23 @@ def read_targfn(targfn):
         "tractor-xmm-N419-hsc-forced.fits",
     ]:
 
+        old_roots = ["FORCED_FLUX", "FORCED_PSFDEPTH", "FORCED_GALDEPTH"]
+        new_roots = ["FLUX", "PSFDEPTH", "GALDEPTH"]
+
         for key in p.colnames:
 
-            if "FORCED_FLUX" in key:
+            for old_root, new_root in zip(old_roots, new_roots):
 
-                p[key].name = key.replace("FORCED_FLUX", "FLUX")
-                log.info(
-                    "{}:\trename {} to {}".format(
-                        basename,
-                        key,
-                        key.replace("FORCED_FLUX", "FLUX"),
+                if old_root in key:
+
+                    p[key].name = key.replace(old_root, new_root)
+                    log.info(
+                        "{}:\trename {} to {}".format(
+                            basename,
+                            key,
+                            key.replace(old_root, new_root),
+                        )
                     )
-                )
 
     # SUPRIME: fix/homogenize some column names
     if basename in [
@@ -768,30 +778,23 @@ def read_targfn(targfn):
         "Subaru_tractor_forced_all-redux-20231025.fits",
     ]:
 
-        for band in get_img_bands("suprime"):
-            oldroot, newroot = "I_A_L{}".format(band[1:]), band
+        old_roots = ["I_A_L{}".format(band[1:]) for band in get_img_bands("suprime")]
+        new_roots = [band for band in get_img_bands("suprime")]
+        old_roots += ["FORCED_FLUX", "FORCED_PSFDEPTH", "FORCED_GALDEPTH"]
+        new_roots += ["FLUX", "PSFDEPTH", "GALDEPTH"]
 
-            for key in p.colnames:
+        for key in p.colnames:
 
-                if oldroot in key:
+            for old_root, new_root in zip(old_roots, new_roots):
 
-                    p[key].name = key.replace(oldroot, newroot)
+                if old_root in key:
+
+                    p[key].name = key.replace(old_root, new_root)
                     log.info(
                         "{}:\trename {} to {}".format(
                             basename,
                             key,
-                            key.replace(oldroot, newroot),
-                        )
-                    )
-
-                if "FORCED_FLUX" in key:
-
-                    p[key].name = key.replace("FORCED_FLUX", "FLUX")
-                    log.info(
-                        "{}:\trename {} to {}".format(
-                            basename,
-                            key,
-                            key.replace("FORCED_FLUX", "FLUX"),
+                            key.replace(old_root, new_root),
                         )
                     )
 
@@ -1438,6 +1441,7 @@ def get_phot_init_table(img, n):
                 ("FLUX_IVAR_{}".format(band), ">f4"),
                 ("FIBERFLUX_{}".format(band), ">f4"),
                 ("PSFDEPTH_{}".format(band), ">f4"),
+                ("GALDEPTH_{}".format(band), ">f4"),
             ]
 
         # ls-{dr9.1.1,dr10} or hsc fluxes
@@ -1446,6 +1450,8 @@ def get_phot_init_table(img, n):
             dtype += [
                 ("FLUX_{}".format(band), ">f4"),
                 ("FLUX_IVAR_{}".format(band), ">f4"),
+                ("PSFDEPTH_{}".format(band), ">f4"),
+                ("GALDEPTH_{}".format(band), ">f4"),
             ]
 
     if img in ["clauds"]:
@@ -1668,20 +1674,21 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
             for band in bands:
 
-                if "FLUX_{}".format(band) in p.colnames:
+                for key in [
+                    "FLUX_{}".format(band),
+                    "FLUX_IVAR_{}".format(band),
+                    "FIBERFLUX_{}".format(band),
+                    "PSFDEPTH_{}".format(band),
+                    "GALDEPTH_{}".format(band),
+                ]:
 
-                    for key in [
-                        "FLUX_{}".format(band),
-                        "FLUX_IVAR_{}".format(band),
-                        "FIBERFLUX_{}".format(band),
-                        "PSFDEPTH_{}".format(band),
-                    ]:
+                    if key in p.colnames:
 
                         dcut[key] = p[key]
 
-                else:
+                    else:
 
-                    log.warning("FLUX_{} not in p.colnames".format(band))
+                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
 
             # dr or hsc?
             dcut["BB_IMG"] = get_bb_img(targfn)
@@ -1689,14 +1696,21 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             # now bb photometry
             for band in ["G", "R", "R2", "I", "I2", "Z"]:
 
-                if "FLUX_{}".format(band) in p.colnames:
+                for key in [
+                    "FLUX_{}".format(band),
+                    "FLUX_IVAR_{}".format(band),
+                    "PSFDEPTH_{}".format(band),
+                    "GALDEPTH_{}".format(band),
+                ]:
 
-                    for key in [
-                        "FLUX_{}".format(band),
-                        "FLUX_IVAR_{}".format(band),
-                    ]:
+                    if key in p.colnames:
 
                         dcut[key] = p[key]
+
+                    else:
+
+                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
+
 
         if img in ["clauds"]:
 
