@@ -459,15 +459,19 @@ def read_vi_fn(fn):
 
     # expected file names per img
     basenames = {
-        img : [os.path.basename(_) for _ in get_vi_fns(img)]
-        for img in allowed_imgs
+        img: [os.path.basename(_) for _ in get_vi_fns(img)] for img in allowed_imgs
     }
 
     # odin, suprime
     # - suprime: add dummy VI_SPECTYPE_FINAL
     # - rename columns
     if (basename in basenames["odin"]) | (basename in basenames["suprime"]):
-        key_olds = ["VI_Z_FINAL", "VI_QUALITY_FINAL", "VI_SPECTYPE_FINAL", "VI_COMMENTS_FINAL"]
+        key_olds = [
+            "VI_Z_FINAL",
+            "VI_QUALITY_FINAL",
+            "VI_SPECTYPE_FINAL",
+            "VI_COMMENTS_FINAL",
+        ]
         key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
         if basename in basenames["odin"]:
             key_olds = ["VI_TARGETID"] + key_olds
@@ -1749,7 +1753,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                     else:
 
-                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
+                        log.warning(
+                            "{} not present in {}".format(key, os.path.basename(targfn))
+                        )
 
             # dr or hsc?
             dcut["BB_IMG"] = get_bb_img(targfn)
@@ -1770,8 +1776,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                     else:
 
-                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
-
+                        log.warning(
+                            "{} not present in {}".format(key, os.path.basename(targfn))
+                        )
 
         if img in ["clauds"]:
 
