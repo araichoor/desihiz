@@ -40,11 +40,6 @@ for img in allowed_img_cases:
     allowed_cases += allowed_img_cases[img]
 allowed_cases = np.unique(allowed_cases).tolist()
 
-# default values
-default_photdir = os.path.join(
-    os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img, "phot"
-)
-
 
 def print_config_infos():
     """
@@ -70,6 +65,23 @@ def print_config_infos():
 
     #
     log.info("spec_rootdir: {}".format(get_spec_rootdir()))
+
+
+def get_img_dir(img):
+    """
+    Get the "root" folder for an imaging survey.
+
+    Args:
+        img: element from allowed_imgs (str)
+
+    Returns:
+        imgdir: folder path (str)
+    """
+    assert img in allowed_imgs
+    imgdir = os.path.join(
+        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img
+    )
+    return imgdir
 
 
 def get_img_bands(img):
@@ -371,14 +383,7 @@ def get_clauds_fn(case, v2=False, uband="u"):
     assert case in allowed_cases
 
     fn = None
-    claudsdir = os.path.join(
-        os.getenv("DESI_ROOT"),
-        "users",
-        "raichoor",
-        "laelbg",
-        "clauds",
-        "phot",
-    )
+    claudsdir = os.path.join(get_img_dir("clauds"), "phot")
 
     field = case[:6]
 
@@ -413,9 +418,7 @@ def get_vi_fns(img):
 
     if img == "odin":
 
-        mydir = os.path.join(
-            os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "odin", "vi"
-        )
+        mydir = os.path.join(get_img_dir("odin"), "vi")
         fns = [
             os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
             os.path.join(mydir, "FINAL_VI_ODIN_N419_20231114.fits"),
@@ -423,16 +426,12 @@ def get_vi_fns(img):
 
     if img == "suprime":
 
-        mydir = os.path.join(
-            os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "suprime", "vi"
-        )
+        mydir = os.path.join(get_img_dir("suprime"), "vi")
         fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz")]
 
     if img == "clauds":
 
-        mydir = os.path.join(
-            os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "clauds", "vi"
-        )
+        mydir = os.path.join(get_img_dir("clauds"), "vi")
         fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V3.ecsv")]
 
     return fns
@@ -459,15 +458,19 @@ def read_vi_fn(fn):
 
     # expected file names per img
     basenames = {
-        img : [os.path.basename(_) for _ in get_vi_fns(img)]
-        for img in allowed_imgs
+        img: [os.path.basename(_) for _ in get_vi_fns(img)] for img in allowed_imgs
     }
 
     # odin, suprime
     # - suprime: add dummy VI_SPECTYPE_FINAL
     # - rename columns
     if (basename in basenames["odin"]) | (basename in basenames["suprime"]):
-        key_olds = ["VI_Z_FINAL", "VI_QUALITY_FINAL", "VI_SPECTYPE_FINAL", "VI_COMMENTS_FINAL"]
+        key_olds = [
+            "VI_Z_FINAL",
+            "VI_QUALITY_FINAL",
+            "VI_SPECTYPE_FINAL",
+            "VI_COMMENTS_FINAL",
+        ]
         key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
         if basename in basenames["odin"]:
             key_olds = ["VI_TARGETID"] + key_olds
@@ -1371,9 +1374,9 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
     assert img in allowed_imgs
     assert case in get_img_cases(img)
 
-    if photdir == None:
+    if photdir is None:
 
-        photdir = default_photdir
+        photdir = os.path.join(get_img_dir(img), "phot")
 
     # odin
     if img == "odin":
@@ -1590,9 +1593,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     assert img in allowed_imgs
     bands = get_img_bands(img)
 
-    if photdir == None:
+    if photdir is None:
 
-        photdir = default_photdir
+        photdir = os.path.join(get_img_dir(img), "phot")
 
     # initializing
     d = get_phot_init_table(img, len(specinfo_table))
@@ -1749,7 +1752,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                     else:
 
-                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
+                        log.warning(
+                            "{} not present in {}".format(key, os.path.basename(targfn))
+                        )
 
             # dr or hsc?
             dcut["BB_IMG"] = get_bb_img(targfn)
@@ -1770,8 +1775,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                     else:
 
-                        log.warning("{} not present in {}".format(key, os.path.basename(targfn)))
-
+                        log.warning(
+                            "{} not present in {}".format(key, os.path.basename(targfn))
+                        )
 
         if img in ["clauds"]:
 
@@ -1848,7 +1854,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         d["CLAUDS_ZPHOT"] = np.zeros(len(d))
         d["CLAUDS"][iibands[iid]] = True
         d["CLAUDS_ID"][iibands[iid]] = z["ID"][iiz]
-        d["CLAUDS_ZPHOT"][iibands[iid]] = z["Z_BEST"][iiz]
+        d["CLAUDS_ZPHOT"][iibands[iid]] = z["ZPHOT"][iiz]
 
     # clauds cosmos_yr1: at least DESILBG_TMG_FINAL and DESILBG_BXU_FINAL
     #   have objects in common, but those have different TARGETIDs

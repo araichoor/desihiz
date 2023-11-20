@@ -26,7 +26,7 @@ def get_suprime_dir():
     return os.path.join(os.getenv("DESI_ROOT"), "users", "dstn", "suprime")
 
 
-def get_get_suprime_annotated_ccdfn():
+def get_suprime_annotated_ccdfn():
 
     suprime_dir = get_suprime_dir()
     return os.path.join(suprime_dir, "ccds-annotated-suprime-IA.fits")
@@ -134,7 +134,7 @@ def get_brn_perccd_gausspsfdepths(
     )
 
     # all ccds (to grab ra0, ra1, etc)
-    annotated_ccdfn = get_get_suprime_annotated_ccdfn()
+    annotated_ccdfn = get_suprime_annotated_ccdfn()
     ccd_d = Table.read(annotated_ccdfn)
     sel = ccd_d["filter"] == band.replace("I", "I-A-L")
     ccd_d = ccd_d[sel]
@@ -416,7 +416,7 @@ def apply_offsets(
 
 def plot_suprime_ccd(ax, band, ccdname, **kwargs):
 
-    annotated_ccdfn = get_get_suprime_annotated_ccdfn()
+    annotated_ccdfn = get_suprime_annotated_ccdfn()
     ccd_d = Table.read(annotated_ccdfn)
 
     sel = ccd_d["filter"] == band.replace("I", "I-A-L")

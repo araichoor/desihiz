@@ -12,7 +12,7 @@ from astropy import units
 from desitarget.targetmask import desi_mask
 from desiutil.log import get_logger
 from desihizmerge.hizmerge_io import (
-    default_photdir,
+    get_img_dir,
     match_coord,
     get_init_infos,
     get_phot_fns,
@@ -239,9 +239,9 @@ def get_odin_phot_infos(case, d, photdir=None):
         photdir (optional, defaults to $DESI_ROOT/users/raichoor/laelbg/{img}/phot):
             folder where the files are
     """
-    if photdir == None:
+    if photdir is None:
 
-        photdir = default_photdir
+        photdir = os.path.join(get_img_dir("odin"), "phot")
 
     # initialize columns we will fill
     bricknames = np.zeros(len(d), dtype="S8")

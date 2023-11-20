@@ -1,0 +1,118 @@
+#!/usr/bin/env python
+
+
+import os
+import numpy as np
+from astropy.table import Table
+from desiutil.log import get_logger
+from desiutil.redirect import stdouterr_redirected
+from desihizmerge.hizmerge_io import (
+    allowed_imgs,
+    get_img_dir,
+    get_img_bands,
+)
+from desihizmerge.angclust_io import (
+    allowed_fields,
+    get_angclust_targs,
+    add_vi,
+)
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outfn",
+        help="output fits filename (default=get_img_dir(img)/phot/{img}-{band}-{field}-for-angclust.fits)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--img",
+        help="imaging used for target selection (default=odin)",
+        choices=allowed_imgs,
+        type=str,
+        default="odin",
+    )
+    parser.add_argument(
+        "--band",
+        help="filter used for target selection (default=N501)",
+        type=str,
+        default="N501",
+    )
+    parser.add_argument(
+        "--field",
+        help="considered field (default=cosmos)",
+        choices=allowed_fields,
+        type=str,
+        default="cosmos",
+    )
+    parser.add_argument(
+        "--mergefn",
+        help="path to the desi-{img}.fits file (default=None)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--log-stdout",
+        "--log_stdout",
+        action="store_true",
+        help="log to stdout instead of redirecting to a file",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    assert args.img in allowed_imgs
+    assert args.band in get_img_bands(args.img)
+    assert args.field in allowed_fields
+
+    if args.outfn is None:
+        args.outfn = os.path.join(
+            get_img_dir(args.img),
+            "phot",
+            "{}-{}-{}-for-angclust.fits".format(args.img, args.band, args.field),
+        )
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    d = get_angclust_targs(args.img, args.band)
+    add_vi(d, args.img, args.band, args.mergefn)
+    d.write(args.outfn, overwrite=args.overwrite)
+
+
+if __name__ == "__main__":
+
+    args = parse()
+
+    assert args.outfn.split(os.path.extsep)[-1] == "fits"
+
+    outlog = args.outfn.replace(".fits", ".log")
+
+    if (os.path.isfile(args.outfn)) & (~args.overwrite):
+
+        msg = "{} exists and args.overwrite=False".format(args.outfn)
+        log.error(msg)
+        raise ValueError(msg)
+
+    if args.log_stdout:
+
+        main()
+
+    else:
+
+        with stdouterr_redirected(to=outlog):
+
+            main()

@@ -11,7 +11,7 @@ from astropy import units
 from desitarget.targetmask import desi_mask
 from desiutil.log import get_logger
 from desihizmerge.hizmerge_io import (
-    default_photdir,
+    get_img_dir,
     match_coord,
     get_img_bands,
     get_init_infos,
@@ -259,9 +259,9 @@ def get_suprime_phot_infos(case, d, photdir=None, v2=False):
         v2 (optional, default to False): if True, then use Dustin's rerun from 20231025
             (bool)
     """
-    if photdir == None:
+    if photdir is None:
 
-        photdir = default_photdir
+        photdir = os.path.join(get_img_dir("suprime"), "phot")
 
     # initialize columns we will fill
     bricknames = np.zeros(len(d), dtype="S8")
