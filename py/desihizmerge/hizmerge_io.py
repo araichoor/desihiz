@@ -1854,7 +1854,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         d["CLAUDS_ZPHOT"] = np.zeros(len(d))
         d["CLAUDS"][iibands[iid]] = True
         d["CLAUDS_ID"][iibands[iid]] = z["ID"][iiz]
-        d["CLAUDS_ZPHOT"][iibands[iid]] = z["Z_BEST"][iiz]
+        d["CLAUDS_ZPHOT"][iibands[iid]] = z["ZPHOT"][iiz]
 
     # clauds cosmos_yr1: at least DESILBG_TMG_FINAL and DESILBG_BXU_FINAL
     #   have objects in common, but those have different TARGETIDs
