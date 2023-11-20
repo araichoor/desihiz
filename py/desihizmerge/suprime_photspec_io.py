@@ -13,7 +13,7 @@ from desispec.io import read_spectra, write_spectra
 from desispec.coaddition import coadd_cameras, coadd_fibermap
 from desispec.spectra import stack as spectra_stack
 from desiutil.log import get_logger
-from desihizmerge.hizmerge_io import match_coord
+from desihizmerge.hizmerge_io import get_img_dir, match_coord
 
 
 log = get_logger()
@@ -82,9 +82,7 @@ def get_tractor_match(d, tractorfn):
 
 def get_filts(bands, waves):
 
-    filtdir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "suprime", "filt"
-    )
+    filtdir = os.path.join(get_img_dir("suprime"), "filt")
     myfilts = {}
 
     for band in bands:

@@ -13,7 +13,7 @@ from desitarget.targetmask import desi_mask
 from desitarget.geomask import match_to
 from desiutil.log import get_logger
 from desihizmerge.hizmerge_io import (
-    default_photdir,
+    get_img_dir,
     get_img_bands,
     match_coord,
     get_init_infos,
@@ -391,9 +391,9 @@ def get_clauds_phot_infos(case, d, photdir=None, v2=None):
         claudsids: the CLAUDS ID (np.array of int)
         targfns:
     """
-    if photdir == None:
+    if photdir is None:
 
-        photdir = default_photdir
+        photdir = os.path.join(get_img_dir("clauds"), "phot")
 
     # initialize columns we will fill
     claudsids = np.zeros(len(d), dtype=int)

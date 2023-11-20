@@ -9,6 +9,7 @@ from desiutil.redirect import stdouterr_redirected
 from desihizmerge.hizmerge_io import (
     print_config_infos,
     allowed_imgs,
+    get_img_dir,
     get_img_cases,
     get_img_bands,
     get_img_infos,
@@ -93,9 +94,7 @@ def main():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
 
     bands = get_img_bands(args.img)
-    photdir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", args.img, "phot"
-    )
+    photdir = os.path.join(get_img_dir(args.img), "phot")
 
     log.info("")
     log.info("bands\t= {}".format(bands))
