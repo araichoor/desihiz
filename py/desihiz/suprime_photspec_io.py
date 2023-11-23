@@ -13,7 +13,7 @@ from desispec.io import read_spectra, write_spectra
 from desispec.coaddition import coadd_cameras, coadd_fibermap
 from desispec.spectra import stack as spectra_stack
 from desiutil.log import get_logger
-from desihizmerge.hizmerge_io import get_img_dir, match_coord
+from desihiz.hizmerge_io import get_img_dir, match_coord
 
 
 log = get_logger()

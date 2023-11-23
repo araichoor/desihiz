@@ -3,7 +3,7 @@
 #
 # -*- coding: utf-8 -*-
 """
-desihizmerge
+desihiz
 ==============
 
 Tools for merging DESI hi-z catalogs.

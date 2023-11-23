@@ -1,4 +1,4 @@
-# desihizmerge
+# desihiz
 
 This code generates "merged" catalogs for the DESI hiz pilot observations.
 It gathers:

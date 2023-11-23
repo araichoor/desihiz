@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import matplotlib
 
-from desihizmerge.hizmerge_io import get_img_bands, get_cosmos2020_fn, match_coord
+from desihiz.hizmerge_io import get_img_bands, get_cosmos2020_fn, match_coord
 
 from desiutil.log import get_logger
 

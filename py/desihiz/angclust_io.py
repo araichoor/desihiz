@@ -7,7 +7,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 from desiutil.log import get_logger
-from desihizmerge.hizmerge_io import (
+from desihiz.hizmerge_io import (
     allowed_imgs,
     get_img_bands,
     get_phot_fns,

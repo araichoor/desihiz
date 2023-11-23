@@ -5,8 +5,8 @@ import multiprocessing
 import numpy as np
 from astropy.table import Table, vstack
 from astropy.io import fits
-from desihizmerge.hizmerge_io import get_img_bands
-from desihizmerge.suprime_photspec_io import (
+from desihiz.hizmerge_io import get_img_bands
+from desihiz.suprime_photspec_io import (
     get_tractor_match,
     process_fn,
     build_hs,
