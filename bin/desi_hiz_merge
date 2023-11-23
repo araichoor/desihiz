@@ -6,7 +6,7 @@ import numpy as np
 from astropy.table import Table, vstack
 from desiutil.log import get_logger
 from desiutil.redirect import stdouterr_redirected
-from desihizmerge.hizmerge_io import (
+from desihiz.hizmerge_io import (
     print_config_infos,
     allowed_imgs,
     get_img_dir,

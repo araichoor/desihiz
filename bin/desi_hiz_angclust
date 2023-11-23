@@ -6,12 +6,12 @@ import numpy as np
 from astropy.table import Table
 from desiutil.log import get_logger
 from desiutil.redirect import stdouterr_redirected
-from desihizmerge.hizmerge_io import (
+from desihiz.hizmerge_io import (
     allowed_imgs,
     get_img_dir,
     get_img_bands,
 )
-from desihizmerge.angclust_io import (
+from desihiz.angclust_io import (
     allowed_fields,
     get_angclust_targs,
     add_vi,

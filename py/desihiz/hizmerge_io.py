@@ -49,8 +49,8 @@ def print_config_infos():
     log.info("NERSC_HOST={}".format(os.getenv("NERSC_HOST")))
     log.info("HOSTNAME={}".format(os.getenv("HOSTNAME")))
 
-    # desispec, desihizmerge code version/path
-    for name in ["desispec", "desihizmerge"]:
+    # desispec, desihiz code version/path
+    for name in ["desispec", "desihiz"]:
         exec("import {}".format(name))
         log.info(
             "running with {} code version: {}".format(
@@ -714,7 +714,7 @@ def get_img_infos(img, case, stdsky):
 
         if img == "odin":
 
-            from desihizmerge.hizmerge_odin import (
+            from desihiz.hizmerge_odin import (
                 get_odin_cosmos_yr1_infos,
                 get_odin_xmmlss_yr2_infos,
                 get_odin_cosmos_yr2_infos,
@@ -729,7 +729,7 @@ def get_img_infos(img, case, stdsky):
 
         if img == "suprime":
 
-            from desihizmerge.hizmerge_suprime import get_suprime_cosmos_yr2_infos
+            from desihiz.hizmerge_suprime import get_suprime_cosmos_yr2_infos
 
             if case == "cosmos_yr2":
 
@@ -737,7 +737,7 @@ def get_img_infos(img, case, stdsky):
 
         if img == "clauds":
 
-            from desihizmerge.hizmerge_clauds import (
+            from desihiz.hizmerge_clauds import (
                 get_clauds_cosmos_yr1_infos,
                 get_clauds_xmmlss_yr2_infos,
                 get_clauds_cosmos_yr2_infos,
@@ -1603,7 +1603,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     # get phot infos
     if img == "odin":
 
-        from desihizmerge.hizmerge_odin import get_odin_phot_infos
+        from desihiz.hizmerge_odin import get_odin_phot_infos
 
         d["BRICKNAME"], d["OBJID"], d["FILENAME"] = get_odin_phot_infos(
             case, specinfo_table, photdir=photdir
@@ -1612,7 +1612,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
     if img == "suprime":
 
-        from desihizmerge.hizmerge_suprime import get_suprime_phot_infos
+        from desihiz.hizmerge_suprime import get_suprime_phot_infos
 
         d["BRICKNAME"], d["OBJID"], d["FILENAME"] = get_suprime_phot_infos(
             case, specinfo_table, photdir, v2=v2
@@ -1620,7 +1620,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
     if img == "clauds":
 
-        from desihizmerge.hizmerge_clauds import get_clauds_phot_infos
+        from desihiz.hizmerge_clauds import get_clauds_phot_infos
 
         d["ID"], d["FILENAME"] = get_clauds_phot_infos(
             case, specinfo_table, photdir, v2=v2

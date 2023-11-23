@@ -12,7 +12,7 @@ from astropy import units
 from desitarget.targetmask import desi_mask
 from desitarget.geomask import match_to
 from desiutil.log import get_logger
-from desihizmerge.hizmerge_io import (
+from desihiz.hizmerge_io import (
     get_img_dir,
     get_img_bands,
     match_coord,

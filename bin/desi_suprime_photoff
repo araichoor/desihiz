@@ -5,7 +5,7 @@ import os
 import numpy as np
 from desiutil.log import get_logger
 from desiutil.redirect import stdouterr_redirected
-from desihizmerge.suprime_photoff_io import (
+from desihiz.suprime_photoff_io import (
     read_photspecfn,
     get_offsets,
     get_ccdnames,

@@ -11,7 +11,7 @@ from astropy.coordinates import SkyCoord
 from astropy import units
 from desitarget.targetmask import desi_mask
 from desiutil.log import get_logger
-from desihizmerge.hizmerge_io import (
+from desihiz.hizmerge_io import (
     get_img_dir,
     match_coord,
     get_init_infos,
