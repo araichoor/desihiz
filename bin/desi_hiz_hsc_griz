@@ -1,0 +1,158 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import numpy as np
+import fitsio
+from astropy.table import Table
+from astropy.io import fits
+from desihiz.hsc_griz import (
+    get_hscwide_pz_fns_bounds,
+    get_match_pz,
+    get_mysel,
+    get_density,
+    create_pdf,
+)
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outroot",
+        help="output root (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--field",
+        choices=["cosmos"],
+        help="field (default=cosmos)",
+        type=str,
+        default="cosmos",
+    )
+    parser.add_argument(
+        "--selection",
+        choices=["v20231206"],
+        help="selection (default=v20231206)",
+        type=str,
+        default="v20231206",
+    )
+    parser.add_argument(
+        "--steps",
+        help="comma-separated list of steps to execute (default=fits,plot)",
+        type=str,
+        default="fits,plot",
+    )
+    parser.add_argument(
+        "--hscrelease",
+        choices=["pdr3"],
+        help="HSC release (default=pdr3)",
+        type=str,
+        default="pdr3",
+    )
+    parser.add_argument(
+        "--parent_rmin",
+        help="min rmag for the parent sample written to file (default=23.0)",
+        type=float,
+        default=23.0,
+    )
+    parser.add_argument(
+        "--parent_rmax",
+        help="max rmag for the parent sample written to file (default=24.5)",
+        type=float,
+        default=24.5,
+    )
+
+    parser.add_argument(
+        "--rmin",
+        help="min rmag, larger than args.parent_rmin (default=23.5)",
+        type=float,
+        default=23.5,
+    )
+    parser.add_argument(
+        "--rmax",
+        help="max rmag, smaller than args.parent_rmax (default=24.4)",
+        type=float,
+        default=24.4,
+    )
+
+    parser.add_argument(
+        "--bsm_maglim",
+        help="we mask bright star up to bsm_maglim (default=12)",
+        type=float,
+        default=12.0,
+    )
+    parser.add_argument(
+        "--zmin", help="min zphot (default=2.2)", type=float, default=2.2
+    )
+    parser.add_argument(
+        "--zmax", help="max zphot (default=3.5)", type=float, default=3.5
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    assert args.rmin >= args.parent_rmin
+    assert args.rmax <= args.parent_rmax
+    for step in args.steps.split(","):
+        assert step in ["fits", "plot"]
+
+    for kwargs in args._get_kwargs():
+        print(kwargs)
+    return args
+
+
+def main():
+
+    args = parse()
+
+    outfn = "{}.fits".format(args.outroot)
+    outpdf = "{}-zphot-rbins.pdf".format(args.outroot)
+    log.info("outfn\t: {}".format(outfn))
+    log.info("outpdf\t: {}".format(outpdf))
+
+    if "fits" in args.steps.split(","):
+
+        # match catalogs
+        d = get_match_pz(
+            args.field,
+            args.hscrelease,
+            rmin=args.parent_rmin,
+            rmax=args.parent_rmax,
+            bsm_maglim=args.bsm_maglim,
+        )
+
+        # add HSC/griz selection
+        mydict = get_mysel(d, args.selection, args.rmin, args.rmax)
+        for key in mydict:
+            d[key] = mydict[key]
+        d.meta["SELECT"] = args.selection
+        d.write(outfn, overwrite=args.overwrite)
+
+    if "plot" in args.steps.split(","):
+
+        d = Table.read(outfn)
+
+        rbins = np.arange(args.rmin, 100, 0.25)
+        ii = np.where(rbins < args.rmax)[0]
+        rbins = rbins[ii.tolist() + [ii.max() + 1]]
+        if rbins[-1] > args.rmax:
+            rbins[-1] = args.rmax
+        rmins = [rbins[0]] + rbins[:-1].tolist()
+        rmaxs = [rbins[-1]] + rbins[1:].tolist()
+
+        densities = [get_density(d, rmin, rmax) for (rmin, rmax) in zip(rmins, rmaxs)]
+
+        create_pdf(outpdf, d, rmins, rmaxs, densities, args.zmin, args.zmax)
+
+
+if __name__ == "__main__":
+    main()
