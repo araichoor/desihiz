@@ -30,7 +30,7 @@ def parse():
     )
     parser.add_argument(
         "--field",
-        choices=["cosmos"],
+        choices=["cosmos", "xmmlss"],
         help="field (default=cosmos)",
         type=str,
         default="cosmos",
