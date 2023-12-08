@@ -13,7 +13,7 @@ from desitarget.brightmask import make_bright_star_mask_in_hp, is_in_bright_mask
 from astropy.coordinates import SkyCoord
 from astropy import units
 
-from desihiz.hizmerge_io import get_cosmos2020_fn, match_coord
+from desihiz.hizmerge_io import get_cosmos2020_fn, get_clauds_fn, match_coord
 from desihiz.plot_utils import custom_hexbin, plot_star_contours
 
 from matplotlib.backends.backend_pdf import PdfPages
@@ -30,7 +30,7 @@ log = get_logger()
 
 def get_hscwide_pz_fns_bounds(field, release):
 
-    assert field in ["cosmos"]
+    assert field in ["cosmos", "xmmlss"]
     assert release in ["pdr2", "pdr3"]
 
     pdir = os.path.join(os.getenv("DESI_ROOT"), "users", "raichoor", "hsc", release)
@@ -50,6 +50,22 @@ def get_hscwide_pz_fns_bounds(field, release):
             pdir, "hsc-{}-wide-photometry-{}.fits".format(release, field)
         )
         ramin, ramax, decmin, decmax = 148, 152, 0, 4
+
+    if field == "xmmlss":
+
+        zfn = get_clauds_fn("xmmlss_yr2")
+        zkeys = {
+            "ID": "ID",
+            "RA": "RA",
+            "DEC": "DEC",
+            "ZPHOT": "ZPHOT",
+        }
+
+        # /global/cfs/cdirs/desi/users/raichoor/hsc/pdr3/hsc-pdr3-wide-photometry-cosmos.query
+        pfn = os.path.join(
+            pdir, "hsc-{}-wide-photometry-{}.fits".format(release, field)
+        )
+        ramin, ramax, decmin, decmax = 33.0, 38.0, -7.0, -3.0
 
     log.info("field\t: {}".format(field))
     log.info("pfn\t: {}".format(pfn))
@@ -146,11 +162,12 @@ def get_match_pz(
     p.meta["AREA"], p.meta["BSMAREA"] = area, unmsk_area
 
     # zphot
-    z = Table(
-        fitsio.read(
-            zfn, columns=[zkeys["ID"], zkeys["RA"], zkeys["DEC"], zkeys["ZPHOT"]]
-        )
-    )
+    columns = [zkeys["ID"], zkeys["RA"], zkeys["DEC"], zkeys["ZPHOT"]]
+    if field == "xmmlss":
+        z = Table.read(zfn)
+        z = z[columns]
+    else:
+        z = Table(fitsio.read(zfn, columns=columns))
     z["ZPHOT"] = z[zkeys["ZPHOT"]].copy()
     if field == "cosmos":
         z["ZPHOT"] = recalibrate_c20zphot(z["ZPHOT"])
