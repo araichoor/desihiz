@@ -1,0 +1,238 @@
+#!/usr/bin/env python
+
+import os
+import numpy as np
+import fitsio
+from astropy.table import Table
+from astropy.io import fits
+from desihiz.hizmerge_io import get_img_bands, get_phot_fns
+from desihiz.suprime_analysis import (
+    add_band_quants,
+    add_c20zphot,
+    add_vi_efftime,
+    add_band_nccd,
+    get_selection_selbands,
+    add_v20231208_sels,
+    plot_selection_diagnosis,
+    plot_selection_nz,
+    plot_selection_spectra,
+)
+from desihiz.suprime_djs import add_djscols, add_djs_parents, add_djs_sels
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outroot",
+        help="output root (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--selection",
+        choices=["djs", "v20231208"],
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--isbug",
+        action="store_true",
+        help="use the suprime bugged photometry? (used for target selection)",
+    )
+    parser.add_argument(
+        "--steps",
+        help="comma-separated list of steps to execute (default=fits,plot)",
+        type=str,
+        default="fits,plot",
+    )
+    parser.add_argument(
+        "--viqualcut",
+        help="secure VI: VI_QUALITY>=viqualcut (default=2.0)",
+        type=float,
+        default=2.0,
+    )
+    parser.add_argument(
+        "--zgoalmin",
+        help="lower z goal boundary (default=2.2)",
+        type=float,
+        default=2.2,
+    )
+    parser.add_argument(
+        "--zgoalmax",
+        help="upper z goal boundary (default=3.6)",
+        type=float,
+        default=3.6,
+    )
+    parser.add_argument(
+        "--efftimemin_hrs",
+        help="minimum EFFTIME_SPEC [hrs] for the plots (default=3.5)",
+        type=float,
+        default=3.5,
+    )
+    parser.add_argument(
+        "--efftimemax_hrs",
+        help="maximum EFFTIME_SPEC [hrs] for the plots (default=5.0)",
+        type=float,
+        default=5.0,
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    args = parse()
+
+    outfn = "{}.fits".format(args.outroot)
+    log.info("outfn = {}".format(outfn))
+
+    np.random.seed(1234)
+    suprime_bands = get_img_bands("suprime")
+    selbands = get_selection_selbands(args.selection)
+
+    #  hopefully this version should be valid for a long time
+    sfn = os.path.join(
+        os.getenv("DESI_ROOT"),
+        "users",
+        "raichoor",
+        "laelbg",
+        "suprime",
+        "v20231120",
+        "desi-suprime.fits",
+    )
+
+    if "fits" in args.steps.split(","):
+
+        # read photometry
+        fn = get_phot_fns(
+            "suprime", "cosmos_yr2", "I427", photdir=None, v2=(not args.isbug)
+        )[0]
+        log.info("fn = {}".format(fn))
+        d = Table(fitsio.read(fn))
+
+        # convert all keys to upper cases..
+        keys = d.colnames
+        for key in keys:
+            d[key].name = key.upper()
+
+        # add per-band infos
+        d.meta["PH_FN"], d.meta["PH_ISBUG"] = fn, args.isbug
+        for band in ["G", "R", "I"] + suprime_bands:
+            d = add_band_quants(d, band)
+
+        # add djs infos
+        d = add_djscols(d, args.isbug)
+
+        # selection
+        if args.selection == "djs":
+            d = add_djs_parents(d, args.isbug)
+            d = add_djs_sels(d, args.isbug)
+        if args.selection == "v20231208":
+            d = add_djs_parents(d, args.isbug)
+            d = add_v20231208_sels(d, args.isbug)
+
+        # cut on the parent samples (lighter file, quicker computation)
+        sel = np.zeros(len(d), dtype=bool)
+        for selband in selbands:
+            sel |= d["PARENT_{}".format(selband)]
+        d = d[sel]
+
+        # add spec. info + ccd infos
+        d = add_c20zphot(d)
+        d = add_vi_efftime(d, sfn, args.isbug)
+        d = add_band_nccd(d, args.isbug)
+
+        # write
+        d.write(outfn, overwrite=args.overwrite)
+
+    if "plot" in args.steps.split(","):
+
+        d = Table(fitsio.read(outfn))
+        hdr = fitsio.read_header(outfn, 1)
+        for key in hdr:
+            d.meta[key] = hdr[key]
+
+        # per-band diagnosis
+        for selband in selbands:
+            outpng = "{}-diagnosis-{}.png".format(args.outroot, selband)
+            plot_selection_diagnosis(
+                outpng,
+                d,
+                args.selection,
+                args.isbug,
+                selband,
+                zgoalmin=args.zgoalmin,
+                zgoalmax=args.zgoalmax,
+                viqualcut=args.viqualcut,
+                efftimemin_hrs=args.efftimemin_hrs,
+                efftimemax_hrs=args.efftimemax_hrs,
+            )
+
+        # overall n(z)
+        for zkey, zroot in zip(["VI_Z", "ZPHOT"], ["zspec", "zphot"]):
+            outpng = "{}-n{}.png".format(args.outroot, zroot)
+            plot_selection_nz(
+                outpng,
+                args.selection,
+                zkey,
+                d,
+                viqualcut=args.viqualcut,
+                efftimemin_hrs=args.efftimemin_hrs,
+                efftimemax_hrs=args.efftimemax_hrs,
+            )
+
+        # spectra
+        if args.selection in ["djs", "v20231208"]:
+            for band, zlo, zmid, zhi in zip(
+                ["I464", "I484", "I505", "I527"],
+                [2.40, 2.70, 2.95, 3.15],
+                [2.70, 2.90, 3.05, 3.25],
+                [2.95, 3.10, 3.30, 3.45],
+            ):
+                outpng = "{}-spectra-{}-{}z{}.png".format(args.outroot, band, zlo, zmid)
+                plot_selection_spectra(
+                    outpng,
+                    args.selection,
+                    d,
+                    band,
+                    zlo,
+                    zmid,
+                    mergefn=sfn,
+                    viqualcut=args.viqualcut,
+                    efftimemin_hrs=args.efftimemin_hrs,
+                    efftimemax_hrs=args.efftimemax_hrs,
+                    lw=0.1,
+                    color="r",
+                )
+                outpng = "{}-spectra-{}-{}z{}.png".format(args.outroot, band, zmid, zhi)
+                plot_selection_spectra(
+                    outpng,
+                    args.selection,
+                    d,
+                    band,
+                    zmid,
+                    zhi,
+                    mergefn=sfn,
+                    viqualcut=args.viqualcut,
+                    efftimemin_hrs=args.efftimemin_hrs,
+                    efftimemax_hrs=args.efftimemax_hrs,
+                    lw=0.1,
+                    color="b",
+                )
+
+
+if __name__ == "__main__":
+    main()
