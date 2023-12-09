@@ -1,0 +1,93 @@
+#!/usr/bin/env python
+
+import os
+import numpy as np
+from astropy.table import Table
+from desihiz.hiz_nz import get_zbins, get_nzs, plot_nzs
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outfn",
+        help="output file (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--img_selection",
+        choices=["hsc-wide_v20231206", "suprime_djs", "suprime_v20231208"],
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--zmin",
+        help="min. value of the redshift bins (default=0.0)",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--zmax",
+        help="max. value of the redshift bins (default=4.0)",
+        type=float,
+        default=4.0,
+    )
+    parser.add_argument(
+        "--dz",
+        help="redshift binning (default=0.05)",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--zgoalmin",
+        help="lower z goal boundary (default=2.2)",
+        type=float,
+        default=2.2,
+    )
+    parser.add_argument(
+        "--zgoalmax",
+        help="upper z goal boundary (default=3.6)",
+        type=float,
+        default=3.6,
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    args = parse()
+
+    zbins = get_zbins(args.zmin, args.zmax, args.dz)
+
+    d = get_nzs(
+        args.outfn,
+        args.img_selection,
+        zbins,
+        overwrite=args.overwrite,
+    )
+    d.write(args.outfn, overwrite=args.overwrite)
+
+    plot_nzs(
+        args.outfn.replace(".ecsv", ".png"),
+        d,
+        zgoalmin=args.zgoalmin,
+        zgoalmax=args.zgoalmax,
+    )
+
+
+if __name__ == "__main__":
+    main()
