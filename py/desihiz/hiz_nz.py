@@ -338,7 +338,7 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
         sel = d["VI"].copy()
         d = d[sel]
 
-        total_rawtarg_nzs = np.zeros(nbin) # "raw" targets, ie data, no smoothing
+        total_rawtarg_nzs = np.zeros(nbin)  # "raw" targets, ie data, no smoothing
         total_targ_nzs = np.zeros(nbin)  # targets
         total_spec_nzs = np.zeros(nbin)  # secure zspec
         total_specfa_nzs = np.zeros(nbin)  # secure zspec + fa
@@ -351,7 +351,7 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
             zs = sd["VI_Z"]
             selok = sd["VI_QUALITY"] >= viqualcut
 
-            # "raw" nz, i.e. from data, no smoothing 
+            # "raw" nz, i.e. from data, no smoothing
             raw_nzs = np.zeros(nbin)
             for i in range(nbin):
                 sel = (zs >= zbins[i]) & (zs < zbins[i + 1]) & (selok)
@@ -423,7 +423,7 @@ def plot_nzs(outpng, d, zgoalmin=2.2, zgoalmax=3.6, ylim=None):
 
     # all "raw" targets (ie data)
     ax.plot(
-        zcens,                                                                                                                                              
+        zcens,
         d["NRAW_TARG_PER_DEG2"],
         color="y",
         alpha=1.0,
