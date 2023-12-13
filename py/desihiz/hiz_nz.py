@@ -8,6 +8,7 @@ import os
 import numpy as np
 from astropy.table import Table
 from scipy.interpolate import splrep, BSpline
+from sklearn.mixture import GaussianMixture
 from desihiz.hizmerge_io import get_img_dir
 from desihiz.suprime_analysis import get_selection_selbands
 from matplotlib import pyplot as plt
@@ -148,10 +149,23 @@ def create_zspeceff(img, field, zbins):
 
 def get_zspeceff(img, field, efftime, zbins):
 
+    zcens = 0.5 * (zbins[:-1] + zbins[1:])
+
     fn = get_zspeceff_fn(img, field)
     in_d = Table.read(fn)
     in_zcens = 0.5 * (in_d["ZMIN"] + in_d["ZMAX"])
     in_effs = in_d["EFF_{}".format(efftime.upper())]
+
+    # handle boundaries
+    # TODO: code in a more robust way...
+    if in_zcens[0] > zcens[0]:
+        assert in_zcens[0] - zcens[0] < 0.1
+        in_zcens = np.append(zcens[0], in_zcens)
+        in_effs = np.append(in_effs[0], in_effs)
+    if in_zcens[-1] < zcens[-1]:
+        assert zcens[-1] - in_zcens[-1] < 0.1
+        in_zcens = np.append(in_zcens, zcens[-1])
+        in_effs = np.append(in_effs, in_effs[-1])
 
     sel = np.isfinite(in_effs)
     in_zcens, in_effs = in_zcens[sel], in_effs[sel]
@@ -164,8 +178,44 @@ def get_zspeceff(img, field, efftime, zbins):
         left=np.nan,
         right=np.nan,
     )
-
     return effs
+
+
+def get_1dgmm_mbest(zs, ngmm):
+
+    zs_copy = None
+    if len(zs.shape) == 1:
+        zs_copy = zs.copy()
+        zs = zs.reshape(-1, 1)
+    assert len(zs.shape) == 2
+
+    N = np.arange(1, ngmm)
+    models = [None for i in range(len(N))]
+    for i in range(len(N)):
+        models[i] = GaussianMixture(N[i]).fit(zs)
+
+    # compute the AIC and the BIC
+    AIC = [m.aic(zs) for m in models]
+    BIC = [m.bic(zs) for m in models]
+
+    M_best = models[np.argmin(AIC)]
+
+    if zs_copy is not None:
+        zs = zs_copy
+
+    return M_best
+
+
+def get_1dgmm_pdf(M_best, cens):
+
+    assert len(cens.shape) == 1
+
+    logprob = M_best.score_samples(cens.reshape(-1, 1))
+    responsibilities = M_best.predict_proba(cens.reshape(-1, 1))
+    pdf = np.exp(logprob)
+    pdf_individual = responsibilities * pdf[:, np.newaxis]
+
+    return pdf
 
 
 def get_nzs(outfn, img_selection, zbins, overwrite=False):
@@ -179,6 +229,7 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
     outd = Table()
     outd["ZMIN"], outd["ZMAX"] = zbins[:-1], zbins[1:]
     for key in [
+        "NRAW_TARG_PER_DEG2",
         "N_TARG_PER_DEG2",
         "SPECTRO_EFF",
         "N_ZOK_PER_DEG2",
@@ -195,6 +246,8 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
     # - use n(z) from cosmos2020_zphot
     # - apply per-z 2h-spectro. efficiency from Christophe file
     #   (computed from other data, but should get to the right direction)
+    #
+    # ngmm = 6: nb of Gaussians in the GaussianMixture
     if img_selection == "hsc-wide_v20231206":
 
         targdens, farate = 1150.0, 0.83
@@ -204,17 +257,27 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
         sel_fn = os.path.join(
             mydir, "hsc-wide", "analysis", "v20231206", "hsc-wide-v20231206-cosmos.fits"
         )
+        ngmm = 6
 
         d = Table.read(sel_fn)
         sel = (d["ISZPHOT"]) & (d["SELECTION"])
         d = d[sel]
+        zs = d["ZPHOT"]
 
-        nzs = np.zeros(nbin)
-
+        # "raw" nz, i.e. from data, no smoothing
+        raw_nzs = np.zeros(nbin)
         for i in range(nbin):
 
-            sel = (d["ZPHOT"] >= zbins[i]) & (d["ZPHOT"] < zbins[i + 1])
-            nzs[i] = sel.sum()
+            sel = (zs >= zbins[i]) & (zs < zbins[i + 1])
+            raw_nzs[i] = sel.sum()
+
+        # normalize to targdens
+        raw_nzs *= targdens / raw_nzs.sum()
+        outd["NRAW_TARG_PER_DEG2"] = raw_nzs.copy()
+
+        # now working from the GMM
+        M_best = get_1dgmm_mbest(zs, ngmm)
+        nzs = get_1dgmm_pdf(M_best, zcens)
 
         # normalize to targdens
         nzs *= targdens / nzs.sum()
@@ -242,6 +305,8 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
     #   - spec. eff.: use the fraction of VI_QUALITY>=2.0 (flat with redshift)
     #       (not super rigourous as we re using here an optimized selection
     #       not the "djs" which has been observed)
+    #
+    # ngmm: nb of Gaussians in the GaussianMixture
     if img_selection == "suprime_v20231208":
 
         targdens, farate = 800.0, 0.74
@@ -253,6 +318,12 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
         )
 
         selbands = get_selection_selbands("v20231208")
+        perband_ngmms = {
+            "I464": 9,
+            "I484": 9,
+            "I505": 9,
+            "I527": 6,
+        }
         perband_targdenss = {
             "I464": 300.0,
             "I484": 200.0,
@@ -267,30 +338,42 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
         sel = d["VI"].copy()
         d = d[sel]
 
+        total_rawtarg_nzs = np.zeros(nbin) # "raw" targets, ie data, no smoothing
         total_targ_nzs = np.zeros(nbin)  # targets
         total_spec_nzs = np.zeros(nbin)  # secure zspec
         total_specfa_nzs = np.zeros(nbin)  # secure zspec + fa
 
         for band in selbands:
 
-            nzs = np.zeros(nbin)
-
             sel = d["SEL_{}".format(band)].copy()
             sd = d[sel]
 
+            zs = sd["VI_Z"]
             selok = sd["VI_QUALITY"] >= viqualcut
 
+            # "raw" nz, i.e. from data, no smoothing 
+            raw_nzs = np.zeros(nbin)
             for i in range(nbin):
-                sel = (sd["VI_Z"] >= zbins[i]) & (sd["VI_Z"] < zbins[i + 1]) & (selok)
-                nzs[i] = sel.sum()
+                sel = (zs >= zbins[i]) & (zs < zbins[i + 1]) & (selok)
+                raw_nzs[i] = sel.sum()
+
+            # normalize to targdens
+            raw_nzs *= perband_targdenss[band] / raw_nzs.sum()
+            outd["{}_NRAW_TARG_PER_DEG2".format(band)] = raw_nzs.copy()
+            total_rawtarg_nzs += raw_nzs
+
+            # now working from the GMM
+            M_best = get_1dgmm_mbest(zs[selok], perband_ngmms[band])
+            nzs = get_1dgmm_pdf(M_best, zcens)
 
             # normalize to targdens
             nzs *= perband_targdenss[band] / nzs.sum()
             outd["{}_N_TARG_PER_DEG2".format(band)] = nzs.copy()
-            total_targ_nzs += nzs
+            total_targ_nzs += nzs.copy()
 
             # apply spectro. efficiency
             perband_speceff[band] = selok.mean()
+
             outd["{}_SPECTRO_EFF".format(band)] = perband_speceff[band]
             nzs *= perband_speceff[band]
             outd["{}_N_OK_PER_DEG2".format(band)] = nzs.copy()
@@ -302,6 +385,7 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
             total_specfa_nzs += nzs
 
         # record total nzs
+        outd["NRAW_TARG_PER_DEG2"] = total_rawtarg_nzs
         outd["N_TARG_PER_DEG2"] = total_targ_nzs
         avg_eff = np.zeros(nbin)
         for band in selbands:
@@ -331,13 +415,23 @@ def get_nzs(outfn, img_selection, zbins, overwrite=False):
     return outd
 
 
-def plot_nzs(outpng, d, zgoalmin=2.2, zgoalmax=3.6):
+def plot_nzs(outpng, d, zgoalmin=2.2, zgoalmax=3.6, ylim=None):
 
     zcens = 0.5 * (d["ZMIN"] + d["ZMAX"])
 
     fig, ax = plt.subplots()
 
-    # all targets
+    # all "raw" targets (ie data)
+    ax.plot(
+        zcens,                                                                                                                                              
+        d["NRAW_TARG_PER_DEG2"],
+        color="y",
+        alpha=1.0,
+        zorder=0,
+        label="All targets: data ({:.0f}/deg2)".format(d["NRAW_TARG_PER_DEG2"].sum()),
+    )
+
+    # all targets, gmm
     ax.fill_between(
         zcens,
         0.0 * zcens,
@@ -345,7 +439,7 @@ def plot_nzs(outpng, d, zgoalmin=2.2, zgoalmax=3.6):
         color="orange",
         alpha=0.5,
         zorder=0,
-        label="All targets ({:.0f}/deg2)".format(d["N_TARG_PER_DEG2"].sum()),
+        label="All targets, GMM ({:.0f}/deg2)".format(d["N_TARG_PER_DEG2"].sum()),
     )
 
     # spectro. efficiency
@@ -386,7 +480,7 @@ def plot_nzs(outpng, d, zgoalmin=2.2, zgoalmax=3.6):
     ax.set_xlabel("Redshift z")
     ax.set_ylabel("N [/deg2]")
     ax.set_xlim(0, 4)
-    ax.set_ylim(0, 100)
+    ax.set_ylim(ylim)
     ax.yaxis.set_major_locator(MultipleLocator(10))
     ax.grid()
     ax.legend(loc=2, fontsize=10)

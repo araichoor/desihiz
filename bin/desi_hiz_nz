@@ -40,9 +40,9 @@ def parse():
     )
     parser.add_argument(
         "--dz",
-        help="redshift binning (default=0.05)",
+        help="redshift binning (default=0.01)",
         type=float,
-        default=0.05,
+        default=0.01,
     )
     parser.add_argument(
         "--zgoalmin",
@@ -86,6 +86,7 @@ def main():
         d,
         zgoalmin=args.zgoalmin,
         zgoalmax=args.zgoalmax,
+        ylim=(0, 30),
     )
 
 
