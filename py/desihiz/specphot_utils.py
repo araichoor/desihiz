@@ -11,7 +11,7 @@ from speclite import filters as speclite_filters
 
 def get_opt_waves():
 
-    return np.arange(3500, 10001, dtype=float)
+    return np.arange(3000, 10001, dtype=float)
 
 
 def get_filt_fns():
