@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+
+import os
+import numpy as np
+from astropy.table import Table
+from desihiz.hiz_nz import get_zbins
+from desihiz.specphot_utils import get_filts, get_speclite_filts
+from desihiz.templates_utils import get_template_infos, read_templates, compute_mags
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+log = get_logger()
+
+_ = get_template_infos()
+allowed_templates = list(_.keys())
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outroot",
+        help="output root (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--templates",
+        help="csv of templates to consider; (default={})".format(
+            ",".join(allowed_templates)
+        ),
+        type=str,
+        default=",".join(allowed_templates),
+    )
+    parser.add_argument(
+        "--img",
+        choices=["clauds", "odin", "suprime"],
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--zmin",
+        help="min. value of the redshift bins (default=2.0)",
+        type=float,
+        default=2.0,
+    )
+    parser.add_argument(
+        "--zmax",
+        help="max. value of the redshift bins (default=4.0)",
+        type=float,
+        default=4.0,
+    )
+    parser.add_argument(
+        "--dz",
+        help="redshift binning (default=0.01)",
+        type=float,
+        default=0.01,
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+    assert np.all(np.in1d(args.templates.split(","), allowed_templates))
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    args = parse()
+
+    zs = get_zbins(args.zmin, args.zmax, args.dz)
+
+    # filters
+    filts = get_filts()
+
+    all_instbands = list(filts.keys())
+    for instband in all_instbands:
+
+        if (
+            ((instband.split("_")[0] == "MEGACAM") & (args.img not in ["clauds"]))
+            | ((instband.split("_")[0] == "DECAM") & (args.img not in ["odin"]))
+            | ((instband.split("_")[0] == "SUPRIME") & (args.img not in ["suprime"]))
+        ):
+
+            _ = filts.pop(instband)
+
+    speclite_filts = get_speclite_filts(filts)
+
+    # templates
+    templates = read_templates(args.templates.split(","))
+    hs = compute_mags(templates, zs, speclite_filts)
+    hs.writeto("{}.fits".format(args.outroot), overwrite=args.overwrite)
+
+if __name__ == "__main__":
+    main()
