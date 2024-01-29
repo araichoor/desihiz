@@ -421,7 +421,7 @@ def get_vi_fns(img):
         mydir = os.path.join(get_img_dir("odin"), "vi")
         fns = [
             os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
-            os.path.join(mydir, "FINAL_VI_ODIN_N419_20231114.fits"),
+            os.path.join(mydir, "FINAL_VI_ODIN_N419_20231129.fits"),
         ]
 
     if img == "suprime":
@@ -432,7 +432,7 @@ def get_vi_fns(img):
     if img == "clauds":
 
         mydir = os.path.join(get_img_dir("clauds"), "vi")
-        fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V3.ecsv")]
+        fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V4.ecsv")]
 
     return fns
 
