@@ -2,17 +2,36 @@
 Change Log
 ==========
 
-2.0.1 (unreleased)
+2.1.1 (unreleased)
 ------------------
 
 * No changes yet.
+
+2.1.0 (2024-01-29)
+------------------
+
+* Small updates, mostly with new VI files and additional scripts for the HSC/griz selection.
+
+* get_vi_fns(): update odin/n419 and clauds vi files (PR `#17`_).
+* scripts to compute the predicted n(z) (PR `#15`_).
+* add first batch of suprime analysis scripts (PR `#14`_).
+* add hsc_griz xmmlss case (PR `#13`_).
+* add hsc_griz scripts (PR `#12`_).
+* Repo name change (PR `#11`_).
+
+.. _`#17`: https://github.com/araichoor/desihizmerge/pull/17
+.. _`#15`: https://github.com/araichoor/desihizmerge/pull/15
+.. _`#14`: https://github.com/araichoor/desihizmerge/pull/14
+.. _`#13`: https://github.com/araichoor/desihizmerge/pull/13
+.. _`#12`: https://github.com/araichoor/desihizmerge/pull/12
+.. _`#11`: https://github.com/araichoor/desihizmerge/pull/11
 
 2.0.0 (2023-11-20)
 ------------------
 
 * Second tagged version; used to generate the odin, suprime, and clauds v20231120 catalogs.                                                                             
 
-* Angclust + clauds/zphot + cleaning (PR `#10`).
+* Angclust + clauds/zphot + cleaning (PR `#10`_).
 * Vi update (PR `#9`_).
 * propagate more depth columns (PR `#8`_).
 * Suprime rerun2 (PR `#7`_).
