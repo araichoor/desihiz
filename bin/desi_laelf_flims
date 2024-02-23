@@ -1,0 +1,233 @@
+#!/usr/bin/env python
+
+"""
+Script used for the HEPAP preparatory study, to compute the goal densities.
+"""
+
+import os
+import numpy as np
+from astropy.table import Table
+from desihiz.laelf_utils import allowed_lfsrcs, get_filt_lminmax, get_filtmag, get_nlaes
+from desiutil.log import get_logger
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib import gridspec
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outroot",
+        help="output root (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--survey",
+        help="survey (default=specs5)",
+        type=str,
+        choices=["desi2", "specs5"],
+        default="specs5",
+    )
+    parser.add_argument(
+        "--lfsrc",
+        help="LF to be used (default=anand_variable)",
+        type=str,
+        choices=allowed_lfsrcs,
+        default="anand_variable",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="overwrite files",
+        action="store_true",
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def get_goal_n_per_mpc3_per_filt(survey):
+    if survey == "desi2":
+        return 0.0012  # 1000/deg2
+    if survey == "specs5":
+        return 0.0037  # 3000/deg2
+        # return 0.0050 # 4000/deg2
+
+
+def main():
+
+    args = parse()
+
+    # flims
+    flims = np.linspace(1, 20, 191) * 1e-17
+
+    #
+    goal_n_per_mpc3_per_filt = get_goal_n_per_mpc3_per_filt(args.survey)
+
+    # filters infos
+    filts = get_filt_lminmax(args.survey)
+    filtnames = list(filts.keys())
+    nfilt = len(filtnames)
+    cols = plt.rcParams["axes.prop_cycle"].by_key()["color"][:nfilt]
+
+    # to store results
+    d = Table()
+    d.meta["SURVEY"] = args.survey
+    d.meta["LFSRC"] = args.lfsrc
+    d.meta["GOALDENS"] = goal_n_per_mpc3_per_filt
+    d["FILT"] = filtnames
+    for key in ["ZMIN", "ZMAX", "FLIM", "MAGLIM", "NLAE_PER_MPC3", "NLAE_PER_DEG2"]:
+        d[key] = np.nan
+
+    fig = plt.figure(figsize=(15, 5))
+    gs = gridspec.GridSpec(1, 2, wspace=0.2)
+
+    axs = {}
+    axs["mpc3"] = fig.add_subplot(gs[0])
+    axs["deg2"] = fig.add_subplot(gs[1])
+
+    axs["mpc3"].axhline(
+        goal_n_per_mpc3_per_filt,
+        color="k",
+        ls="--",
+        zorder=0,
+        label="Goal of {:.1e}  per Mpc3".format(goal_n_per_mpc3_per_filt),
+    )
+
+    xticks = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]) * 1e-17
+    xticks = np.append(xticks, np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]) * 1e-16)
+    xticks = np.append(xticks, np.array([1e-15]))
+    sel = (xticks >= flims.min()) & (xticks <= flims.max())
+    xticks = xticks[sel]
+
+    # for text in the plot
+    txt_xs = [0.025, 0.125, 0.225, 0.325, 0.475]
+    txt_y, txt_dy = 0.30, -0.04
+    # txt_xs = [_ + 0.40 for _ in txt_xs]
+    # txt_y += 0.60
+    for txt_x, txt in zip(txt_xs, ["BAND", "ZMIN", "ZMAX", "FLIM", "N/Mpc3"]):
+        axs["mpc3"].text(
+            txt_x,
+            txt_y - txt_dy,
+            txt,
+            color="k",
+            ha="left",
+            transform=axs["mpc3"].transAxes,
+        )
+    for txt_x, txt in zip(txt_xs, ["BAND", "ZMIN", "ZMAX", "FLIM", "N/deg2"]):
+        axs["deg2"].text(
+            txt_x,
+            txt_y - txt_dy,
+            txt,
+            color="k",
+            ha="left",
+            transform=axs["deg2"].transAxes,
+        )
+
+    for i, (filt, col) in enumerate(zip(filtnames, cols)):
+
+        #
+        lmin, lmax = filts[filt]["lmin"], filts[filt]["lmax"]
+        d["ZMIN"][i], d["ZMAX"][i] = lmin / 1215.67 - 1.0, lmax / 1215.67 - 1.0
+
+        n_per_mpc3, n_per_deg2 = get_nlaes(
+            flims, args.lfsrc, d["ZMIN"][i], d["ZMAX"][i]
+        )
+
+        igoal = np.abs(n_per_mpc3 - goal_n_per_mpc3_per_filt).argmin()
+        d["FLIM"][i] = flims[igoal]
+        d["MAGLIM"][i] = get_filtmag(d["FLIM"][i], 0.5 * (lmax + lmin), lmax - lmin)
+        d["NLAE_PER_MPC3"][i] = n_per_mpc3[igoal]
+        d["NLAE_PER_DEG2"][i] = n_per_deg2[igoal]
+
+        axs["mpc3"].plot(flims, n_per_mpc3, color=col, lw=0.5)
+        axs["deg2"].plot(flims, n_per_deg2, color=col, lw=0.5)
+
+        axs["mpc3"].scatter(
+            d["FLIM"][i], d["NLAE_PER_MPC3"][i], color=col, marker="x", s=30
+        )
+        axs["deg2"].scatter(
+            d["FLIM"][i], d["NLAE_PER_DEG2"][i], color=col, marker="x", s=30
+        )
+
+        txt_ys = [txt_y for _ in txt_xs]
+        common_txts = [
+            filt,
+            "{:.2f}".format(d["ZMIN"][i]),
+            "{:.2f}".format(d["ZMAX"][i]),
+            "{:.2e}".format(d["FLIM"][i]),
+        ]
+        txts = common_txts + ["{:.1e}".format(d["NLAE_PER_MPC3"][i])]
+        for txt_x, txt in zip(txt_xs, txts):
+            axs["mpc3"].text(
+                txt_x, txt_y, txt, color=col, ha="left", transform=axs["mpc3"].transAxes
+            )
+        txts = common_txts + ["{:.0f}".format(d["NLAE_PER_DEG2"][i])]
+        for txt_x, txt in zip(txt_xs, txts):
+            axs["deg2"].text(
+                txt_x, txt_y, txt, color=col, ha="left", transform=axs["deg2"].transAxes
+            )
+        txt_y += txt_dy
+
+    sel = np.isfinite(d["NLAE_PER_DEG2"])
+    all_nlae_per_deg2 = d["NLAE_PER_DEG2"][sel].sum()
+
+    for ax, ylab, ylim in zip(
+        [axs["mpc3"], axs["deg2"]],
+        ["N(LAE) per Mpc3", "N(LAE) per deg2"],
+        [(0, 0.007), (0, 1000)],
+    ):
+        if ax == axs["mpc3"]:
+            ax.legend(loc=2)
+            ax.set_title("{} ; LAE LF: {}".format(args.survey, args.lfsrc))
+        if ax == axs["deg2"]:
+            ax.set_title(
+                "{} ({:.0f} /deg2) ; LAE LF: {}".format(
+                    args.survey, all_nlae_per_deg2, args.lfsrc
+                )
+            )
+        ax.set_xlabel("Flim [erg/s/cm2/A]")
+        ax.set_ylabel(ylab)
+        ax.set_xlim(xticks[0], xticks[-1])
+        ax.set_ylim(ylim)
+        ax.set_xscale("log")
+        ax.set_xticks(xticks)
+        ax.grid()
+
+    plt.savefig("{}.png".format(args.outroot), bbox_inches="tight")
+    plt.close()
+
+    # print + store
+    log.info("")
+    log.info(
+        "# SURVEY, LFSRC, TOTAL_NLAE_PER_DEG2 = {}, {}, {:.0f}".format(
+            args.survey, args.lfsrc, all_nlae_per_deg2
+        )
+    )
+    log.info("#")
+    log.info("# FILT ZMIN ZMAX FLIM MAGLIM N_PER_MPC3 N_PER_DEG2")
+    for i in range(nfilt):
+        log.info(
+            "{}\t{:.2f}\t{:.2f}\t{:.2e}\t{:.2f}\t{:.1e}\t{:.0f}".format(
+                d["FILT"][i],
+                d["ZMIN"][i],
+                d["ZMAX"][i],
+                d["FLIM"][i],
+                d["MAGLIM"][i],
+                d["NLAE_PER_MPC3"][i],
+                d["NLAE_PER_DEG2"][i],
+            )
+        )
+    log.info("")
+    d.write("{}.ecsv".format(args.outroot), overwrite=args.overwrite)
+
+
+if __name__ == "__main__":
+    main()
