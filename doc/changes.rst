@@ -2,10 +2,18 @@
 Change Log
 ==========
 
-2.1.1 (unreleased)
+2.2.1 (unreleased)
 ------------------
 
 * No changes yet.
+
+
+2.2.0 (2024-02-22)
+------------------
+
+* add scripts used to compute the LAE density predictions (PR `#18`_).
+
+.. _`#18`: https://github.com/araichoor/desihiz/pull/18
 
 2.1.0 (2024-01-29)
 ------------------
