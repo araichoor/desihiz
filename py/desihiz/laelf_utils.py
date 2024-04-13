@@ -387,3 +387,34 @@ def get_filtmag(flam, filt_cen, filt_wid):
     mag = -48.60 - 2.5 * np.log10(filt_fnu.value)
 
     return mag
+
+
+def get_filtflam(mag, filt_cen, filt_wid):
+    """
+    Convert a AB magnitude to a flux for a filter.
+
+    Args:
+        mag: AB magnitude (float)
+        filt_cen: filter central wavelength in A (float)
+        filt_wid: filter width in A (float)
+
+    Returns:
+        flam: flux flimit in erg / s / cm2 / A (float)
+
+    Notes:
+        Credit to A. Dey.
+        This is the inverse of get_filtmag().
+    """
+
+    filt_fnu = 10. ** (-0.4 * (mag + 48.60))
+
+    filt_fnu *= u.erg / u.cm**2 / u.s / u.Hz
+
+    filt_lam = filt_fnu.to(
+        u.erg / u.cm**2 / u.s / u.angstrom,
+        equivalencies=u.spectral_density(filt_cen * u.angstrom),
+    )
+
+    flam = filt_lam.value * filt_wid
+
+    return flam
