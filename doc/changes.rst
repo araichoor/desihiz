@@ -2,11 +2,17 @@
 Change Log
 ==========
 
-2.2.1 (unreleased)
+2.3.1 (unreleased)
 ------------------
 
-* No changes yet.
+* No changes yet
 
+2.3.0 (2024-04-12)
+------------------
+
+* Angclust N419 (PR `#19`_).
+
+.. _`#19`: https://github.com/araichoor/desihiz/pull/19
 
 2.2.0 (2024-02-22)
 ------------------
