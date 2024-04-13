@@ -10,12 +10,14 @@ from desihiz.hizmerge_io import (
     allowed_imgs,
     get_img_dir,
     get_img_bands,
+    get_ext_coeffs,
 )
 from desihiz.angclust_io import (
     allowed_fields,
     get_angclust_targs,
     add_vi,
 )
+from desihiz.laelf_utils import get_filt_lminmax, get_filtflam
 from argparse import ArgumentParser
 
 log = get_logger()
@@ -89,7 +91,28 @@ def main():
         log.info("{}\t{}".format(kwargs[0], kwargs[1]))
 
     d = get_angclust_targs(args.img, args.band)
+
+    # AR overwrite LINEFLUX, use ext.-corr. mag.
+    # AR (see emails with Arjun from 2024/04/12)
+    if "LINEFLUX" in d.colnames:
+        d.remove_column("LINEFLUX")
+    if "lineflux" in d.colnames:
+        d.remove_column("lineflux")
+    ext_coeff = get_ext_coeffs(args.img)[args.img.upper()][args.band]
+    mags = 22.5 - 2.5 * np.log10(d["FLUX_{}".format(args.band)]) - ext_coeff * d["EBV"]
+    filt = get_filt_lminmax(args.img)[args.band]
+    lmin, lmax = filt["lmin"], filt["lmax"]
+    filt_cen, filt_wid = 0.5 * (lmin + lmax), lmax - lmin
+    log.info(
+        "add LINEFLUX using: (filt_cen, filt_wid) = ({}, {})".format(
+            filt_cen, filt_wid,
+        )
+    )
+    d["LINEFLUX"] = get_filtflam(mags, filt_cen, filt_wid)
+
+    # AR add vi
     add_vi(d, args.img, args.band, args.mergefn)
+
     d.write(args.outfn, overwrite=args.overwrite)
 
 
