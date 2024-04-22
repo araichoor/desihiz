@@ -31,6 +31,13 @@ def get_odin_cosmos_yr1_infos():
     Returns:
         mydict: dictionary with {keys: arrays},
             with keys: TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION
+
+    Notes:
+        Ad hoc method, based on how ToO-input.ecsv is built
+            (see fadir + "odin-create-too.py").
+        We rely on the fact the To-inputO.ecsv is concatenating catalogs,
+            starting with n501, then n673, then others.
+        We identify the "boundaries" with the orig_row column.
     """
     #
     fadir = os.path.join(
@@ -38,23 +45,24 @@ def get_odin_cosmos_yr1_infos():
     )
     t501 = Table.read(os.path.join(fadir, "LAE_Candidates_NB501_v1_targeting.fits.gz"))
     t673 = Table.read(os.path.join(fadir, "LAE_Candidates_NB673_v0_targeting.fits.gz"))
-    d = Table.read(os.path.join(fadir, "ToO.ecsv"))
+    d = Table.read(os.path.join(fadir, "ToO-input.ecsv"))
+
+    # indexes of the "boundaries" (see notes)
+    bound_ii = 1 + np.where(np.diff(d["ORIG_ROW"]) < 0)[0]
 
     # n419 (no targets)
 
     # n501
-    iit501, iid501, d2d501, _, _ = match_coord(
-        t501["RA"], t501["DEC"], d["RA"], d["DEC"], search_radius=1.0
-    )
-    assert (iid501.size == len(t501)) & (d2d501.max() == 0)
+    iid501 = np.arange(0, bound_ii[0], dtype=int)
+    iit501 = d["ORIG_ROW"][iid501]
+    assert np.all(d["RA"][iid501] == t501["RA"][iit501])
+    assert np.all(d["DEC"][iid501] == t501["DEC"][iit501])
 
     # n673
-    iit673, iid673, d2d673, _, _ = match_coord(
-        t673["RA"], t673["DEC"], d["RA"], d["DEC"], search_radius=1.0
-    )
-    assert (iid673.size == len(t673) - 373) & (
-        d2d673.max() == 0
-    )  # 373 rows are not matched..
+    iid673 = np.arange(bound_ii[0], bound_ii[1], dtype=int)
+    iit673 = d["ORIG_ROW"][iid673]
+    assert np.all(d["RA"][iid673] == t673["RA"][iit673])
+    assert np.all(d["DEC"][iid673] == t673["DEC"][iit673])
 
     nrows = [0, iit501.size, iit673.size]
     mydict = get_init_infos("odin", nrows)
