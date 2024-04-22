@@ -2,10 +2,17 @@
 Change Log
 ==========
 
-2.3.1 (unreleased)
+2.3.2 (unreleased)
 ------------------
 
 * No changes yet
+
+2.3.1 (2024-04-21)
+------------------
+
+* bugfix: properly handle n673 cosmos_yr1 case (PR `20`_).
+
+.. _`#20`: https://github.com/araichoor/desihiz/pull/20
 
 2.3.0 (2024-04-12)
 ------------------
