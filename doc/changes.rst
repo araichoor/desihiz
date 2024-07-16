@@ -2,15 +2,24 @@
 Change Log
 ==========
 
-2.3.2 (unreleased)
+2.4.1 (unreleased)
 ------------------
 
 * No changes yet
 
+2.4.0 (2024-07-15)
+------------------
+
+* add n673 vi file (PR `#22`_).
+* bugfix: correct inverted cfht u ebv coeffs (PR `#21`_).
+
+.. _`#22`: https://github.com/araichoor/desihiz/pull/22
+.. _`#21`: https://github.com/araichoor/desihiz/pull/21
+
 2.3.1 (2024-04-21)
 ------------------
 
-* bugfix: properly handle n673 cosmos_yr1 case (PR `20`_).
+* bugfix: properly handle n673 cosmos_yr1 case (PR `#20`_).
 
 .. _`#20`: https://github.com/araichoor/desihiz/pull/20
 
