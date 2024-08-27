@@ -439,7 +439,7 @@ def get_lsst_bands():
     return ["u", "g", "r", "i", "z", "y"]
 
 
-def get_lsst_mags(ws, fs, bands, np_round=2):
+def get_lsst_mags(ws, fs, bands, year=2023, np_round=2):
     """
     Compute the lsst magnitudes for a given spectrum.
 
@@ -447,6 +447,7 @@ def get_lsst_mags(ws, fs, bands, np_round=2):
         ws: wavelengths (1d array of floats)
         fs: fluxes (1d array of floats)
         bands: list of lsst bands (list of str)
+        year (optional, defaults to 2023): speclite version of lsst filters (int)
         np_round (optional, defaults to 2): round mags to np_round digits (int)
 
     Returns:
@@ -455,7 +456,7 @@ def get_lsst_mags(ws, fs, bands, np_round=2):
     # AR template: add noise-free magnitudes
     mags = []
     for band in bands:
-        filter_response = load_filter("lsst2016-{}".format(band))
+        filter_response = load_filter("lsst{}-{}".format(year, band))
         # AR zero-padding spectrum so that it covers the filter response
         pad_ws, pad_fs = ws.copy(), fs.copy()
         if (pad_ws.min() > filter_response.wavelength.min()) | (
