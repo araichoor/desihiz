@@ -46,6 +46,28 @@ def get_outfn(
     z_max,
     z_bin,
 ):
+    """
+    Get a formatted file name.
+
+    Args:
+        outdir: output folder (str)
+        template_fn: template filename; expected basename like "rrtemplate-lbg.fits" (str)
+        template_row: row number of the template in template_fn (starting at 0) (int)
+        efftime_min: EFFTIME_SPEC in minutes (int)
+        noise_method: "flux", "ivar", "ivarmed", or "ivarmed2" (str)
+        rescale_noise_cams: comma-separated list of the cameras to rescale the rd noise (str)
+        rescale_noise_elecs: comma-separated list of the rd noise electrons to rescale to (str)
+        mag_min: minimum magnitude (float)
+        mag_max: maximum magnitude (float)
+        mag_bin: magnitude binning (float)
+        z_min: minimum redshift (float)
+        z_max: maximum redshift (float)
+        z_bin: redshift binning (float)
+
+    Returns:
+        outfn: standardize file name (str)
+
+    """
     assert noise_method in allowed_noise_method
     template = (
         os.path.basename(template_fn).replace("rrtemplate-", "").replace(".fits", "")
@@ -87,6 +109,17 @@ def get_outfn(
 
 # AR read redrock template
 def read_rrtemplate(fn, row):
+    """
+    Read a redrock-formatted template.
+
+    Args:
+        fn: template file name (str)
+        row: zero-indexed row of the template to extract (int)
+
+    Returns:
+        ws: wavelengths (1d np array of floats)
+        fs: fluxes (1d np array of floats)
+    """
     fx = fits.open(fn)
     hdr = fx["BASIS_VECTORS"].header
     ws = np.asarray(
@@ -99,15 +132,26 @@ def read_rrtemplate(fn, row):
     return ws, fs
 
 
-# AR vector to rescale the read noise
-# AR discussion with Julien on Jan. 30th, 2023
-# AR https://desisurvey.slack.com/archives/D01MQB8D5JQ/p1675115375133969
-# AR we use here a typical dark exposure:
-# AR    NIGHT=20230128, EXPID=165078, EXPTIME=1051s, EFFTIME_SPEC=572s, SPEED=1.2)
-# AR the median speed for the dark survey so far is ~1.2
-# AR for now, we hard-code the use of rows=250-500, where both amplifiers have
-# AR    ~consistent read noise for a given camera
 def get_rescale_var_vector(camera, goal_rd_elec, outpng=None):
+    """
+    Vector to rescale the read noise.
+
+    Args:
+        camera: "b", "r", or "z" (str)
+        goal_rd_elec: goal read noise, in electron units (float)
+        outpng (optional, defaults to None): file name for the control plot (str)
+
+    Returns:
+        wave: wavelength array (1d np array of floats)
+        ratio: cvar_goalelec / cvar_std array (1d np array of floats)
+
+    Notes:
+        Discussion with Julien on Jan. 30th, 2023
+        - https://desisurvey.slack.com/archives/D01MQB8D5JQ/p1675115375133969
+        - we use here a typical dark exposure: NIGHT=20230128, EXPID=165078, EXPTIME=1051s, EFFTIME_SPEC=572s, SPEED=1.2
+        - the median speed for the dark survey so far is ~1.2
+        - for now, we hard-code the use of rows=250-500, where both amplifiers have ~consistent read noise for a given camera
+    """
     log.info("camera={}, goal_rd_elec={}".format(camera, goal_rd_elec))
     # AR read
     night, expid, petal = 20230128, 165078, 0
@@ -225,6 +269,19 @@ def get_rescale_var_vector(camera, goal_rd_elec, outpng=None):
 
 
 def read_sky_coadd(fn):
+    """
+    Read the (healpix) sky spectra concatenation file.
+
+    Args:
+        fn: full path to the file (str)
+
+    Returns:
+        _sky_coadd: fits.open(fn)
+
+    Notes:
+        fn typically is args.sky_coadd_fn from desi_simcoadd
+        (current default is skies-jura.fits, a concatenation of TARGETID>0 sky fibers from healpix files)
+    """
     global _sky_coadd
     if _sky_coadd is not None:
         log.info("using cached {}".format(fn))
@@ -243,6 +300,22 @@ def get_skies(
     rescale_noise_cams=None,
     rescale_noise_elecs=None,
 ):
+    """
+    Extract sky fibers for a given effective time, and optionally rescale the noise.
+
+    Args:
+        sky_coadd_fn: full path to the sky concatenation file (str)
+        efftime_min: effective time, in minutes (float)
+        relative_tolerance (optional, defaults to 0.1): select with (efftime / efftime_min - 1) < relative_tolerance (float)
+        rescale_noise_cams (optional, defaults to None): array of cameras for which rescale the noise (list of str)
+        rescale_noise_elecs (optional, defaults to None): array of goal read noise, in electron units (list of float)
+
+    Returns:
+        The "sky structure" (see read_sky_coadd())
+
+    Notes:
+        We use for the effective time 12.15 * TSNR2_LRG / 60.
+    """
     h = read_sky_coadd(sky_coadd_fn)
     sel = (
         np.abs(12.15 * h["SCORES"].data["TSNR2_LRG"] / 60 / efftime_min - 1)
@@ -314,10 +387,24 @@ def get_skies(
     return sky
 
 
-# AR similar to desispec.fluxcalibration.normalize_templates
-# AR but handles padding
-# AR and possibility to use other filter..
 def rescale_template2mag(ws, fs, mag, mag_band, verbose=False):
+    """
+    Return spectra normalized to input magnitudes.
+
+    Args:
+        ws: wavelengths (1d array of floats)
+        fs: fluxes (1d array of floats)
+        mag: desired magnitude (float)
+        band: a band loaded with speclite.filters.load_filter() (str)
+        verbose (optional, defaults to False): print infos on the prompt (bool)
+
+    Returns:
+        rescale_fs: rescaled fluxes
+
+    Notes:
+        Similar to desispec.fluxcalibration.normalize_templates,
+            but handles padding and possibility to use other filter..
+    """
     # AR filter
     filter_response = load_filter(mag_band)
     # AR zero-padding spectrum so that it covers the filter response
@@ -340,10 +427,31 @@ def rescale_template2mag(ws, fs, mag, mag_band, verbose=False):
 
 
 def get_lsst_bands():
+    """
+    Get list list of lsst filters.
+
+    Args:
+        None
+
+    Returns:
+        ["u", "g", "r", "i", "z", "y"]
+    """
     return ["u", "g", "r", "i", "z", "y"]
 
 
 def get_lsst_mags(ws, fs, bands, np_round=2):
+    """
+    Compute the lsst magnitudes for a given spectrum.
+
+    Args:
+        ws: wavelengths (1d array of floats)
+        fs: fluxes (1d array of floats)
+        bands: list of lsst bands (list of str)
+        np_round (optional, defaults to 2): round mags to np_round digits (int)
+
+    Returns:
+        mags: the lsst magnitudes (list of floats, same length as bands)
+    """
     # AR template: add noise-free magnitudes
     mags = []
     for band in bands:
@@ -361,6 +469,21 @@ def get_lsst_mags(ws, fs, bands, np_round=2):
 
 
 def template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band):
+    """
+    Redshift + rescale a template spectrum.
+
+    Args:
+        rf_ws: rest-frame wavelengths (1d array of floats)
+        rf_fs: rest-frame fluxes (1d array of floats)
+        cameras_ws: list of cameras (list of strs)
+        z: redshift to redshift to
+        mag: requested magnitude (float)
+        mag_band: band for the requested magnitude (str)
+
+    Returns:
+        cameras_fs: dictionary, with the redshifted+rescaled flux
+            (1d array of floats) for each camera (dictionary)
+    """
     # AR first rescale to the requested magnitude
     ws = (1 + z) * rf_ws
     fs = rescale_template2mag(ws, rf_fs, mag, mag_band)
@@ -374,6 +497,31 @@ def template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band):
 def get_tsnr2_truez(
     myd, zs, lya_rf_wmin=1215.7 - 5, lya_rf_wmax=1215.7 + 5, wdelta=0.8, smooth=100
 ):
+    """
+    Compute the TSNR2-like values around / excluding the Lya line.
+
+    Args:
+        myd: dictionary with at least thse columns:
+            "{camera}_WAVELENGTH": (nwave)
+            "{camera}_FLUX": (nspec, nwave)
+            "{camera}_IVAR": (nspec, nwave)
+        zs: redshifts for the nspec spectra (array of floats)
+        lya_rf_wmin (optional, defaults to 1215.7 - 5): wavelength (A) of the blueward
+            side of the Lya region (float)
+        lya_rf_wmax (optional, defaults to 1215.7 + 5): wavelength (A) of the redward
+            side of the Lya region (float)
+        wdelta (optional, defaults to 0.8): wavelength bin (float)
+        smooth (optional, defaults to 100): smoothing scale for dF=<F - smooth(F)>
+
+    Returns:
+        mydout: dictionary with the following keys:
+            "TSNR2_{camera}_TRUEZLYA": per-camera TSNR2 over the Lya region (nspec)
+            "TSNR2_{camera}_TRUEZNOLYA": per-camera TSNR2 excluding the Lya region (nspec)
+            "TSNR2_TRUEZLYA" and "TSNR2_TRUEZNOLYA": sum over the cameras (nspec)
+    Notes:
+        We define TSNR2 = (<F - smooth(F)>) ** 2 * IVAR.
+        See desispec.tsnr
+    """
     #
     smoothing = np.ceil(smooth / wdelta).astype(int)
     #
@@ -412,6 +560,35 @@ def get_tsnr2_truez(
 def get_sim(
     rf_ws, rf_fs, sky, z, mag, mag_band, lsst_bands, nsim, np_rand_seed, noise_method
 ):
+    """
+    Create a redshifted+rescaled template with realistic noise.
+
+    Args:
+        rf_ws: rest-frame wavelengths (1d array of floats)
+        rf_fs: rest-frame fluxes (1d array of floats)
+        sky: output of get_skies() (Table())
+        z: redshift (float)
+        mag: requested magnitude (float)
+        mag_band: band for the requested magnitude (str)
+        lsst_bands: list of lsst bands (list of str)
+        nsim: number of realisations (int)
+        np_rand_seed: seed to initialize np.random.seed() (int)
+        noise_method: "flux", "ivar", "ivarmed", or "ivarmed2" (str)
+
+    Returns:
+        myd: dictionary with various entries:
+            FIBERMAP: a fibermap-like Table, with additional custom columns
+            SCORES: a scores-like Table, with additional values computed with get_tsnr2_truez()
+            {camera}_WAVELENGTH: wavelength array (nwave)
+            {camera}_IVAR: ivar array (nsim, nwave), from the sky input
+            {camera}_RESOLUTION: copy of the values from the sky input
+            {camera}_MASK: zeros array (nsim, nwave)
+            {camera}_FLUX_NO_NOISE: redshifted+rescaled template_fs with no noise (nsim, nwave)
+            {camera}_FLUX: redshifed+rescaled template_fs, with noise (nsim, nwave)
+            {camera}_RESCALE_VAR: propagated from the sky input
+    """
+
+    assert noise_method in allowed_noise_method
 
     np.random.seed(np_rand_seed)
     nsky = sky["{}_FLUX".format(cameras[0])].shape[0]
@@ -542,6 +719,24 @@ def get_sim(
 
 
 def create_rrtemplate_with_z(template_fn, outdir, zmin, zmax):
+    """
+    Create a new redrock template file, with a redshift grid stored in a REDSHIFTS extension.
+
+    Args:
+        template_fn: input template file name (str)
+        outdir: output folder name (str)
+        zmin: minimum redshift (float)
+        zmax: maximum redshift (float)
+
+    Returns:
+        Nothing.
+
+    Notes:
+        Output file is written to {outdir}/{basename(template_fn)}.
+        If outdir does not exist, it is created.
+        Redshift grid is 10 ** np.arange(np.log10(1 + zmin), np.log10(1 + zmax), 5e-4) - 1,
+            same way as https://github.com/desihub/redrock/blob/0ba968f7c438c8fbd413e953e02f6d02dd5822e6/py/redrock/templates.py#L106
+    """
     log.info("read {}".format(template_fn))
     # AR open template (with no REDSHIFTS extension)
     h = fits.open(template_fn)
