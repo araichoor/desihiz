@@ -311,7 +311,14 @@ def get_skies(
         rescale_noise_elecs (optional, defaults to None): array of goal read noise, in electron units (list of float)
 
     Returns:
-        The "sky structure" (see read_sky_coadd())
+        sky, a dictionary with the following keys:
+            TARGETID, TSNR2_{BGS,LRG,ELG,LYA}: propagated from sky_coadd_fn["SCORES"]
+            {camera}_WAVELENGTH: copied from sky_coadd_fn
+            {camera}_FLUX: sky_coadd_fn[{camera}_FLUX] * {camera}_RESCALE_VAR ** 0.5
+            {camera}_IVAR: sky_coadd_fn[{camera}_IVAR] / {camera}_RESCALE_VAR
+            {camera}_RESOLUTION: copied from sky_coadd_fn
+            {camera}_RESCALE_VAR: vector used to rescale {camera}_VAR
+            SKY_{camera}_MEDIAN_FLUX, SKY_{camera}_BLUE_MEDIAN_FLUX, SKY_{camera}_RED_MEDIAN_FLUX: median values of the *rescaled* sky flux over the camera, the half-bluest pixels of the camera, and the half-reddest pixels of the camera
 
     Notes:
         We use for the effective time 12.15 * TSNR2_LRG / 60.
@@ -578,8 +585,19 @@ def get_sim(
 
     Returns:
         myd: dictionary with various entries:
-            FIBERMAP: a fibermap-like Table, with additional custom columns
-            SCORES: a scores-like Table, with additional values computed with get_tsnr2_truez()
+            FIBERMAP: a fibermap-like Table, with the following columns:
+                TRUE_Z: input z
+                COADD_FIBERSTATUS: 0
+                OBJTYPE: "TGT"
+                TARGET_RA, TARGET_DEC: 206.56, 57.07 (coordinate with a low EBV)
+                MAG_{band} for band in lsstbands: magnitudes in the lsst bands
+                SKY_TARGETID: TARGETID of the sky coadd used for adding noise
+                SKY_{camera}_MEDIAN_FLUX, SKY_{camera}_BLUE_MEDIAN_FLUX, SKY_{camera}_RED_MEDIAN_FLUX: median values of the *rescaled* sky flux over the camera, the half-bluest pixels of the camera, and the half-reddest pixels of the camera
+            SCORES: a scores-like Table, with the following columns:
+                RANDSEED: numpy random seed
+                TSNR2_{BGS,LRG,ELG,LYA}: values propagated from the sky coadd
+                TSNR2_TRUEZLYA, TSNR2_TRUEZLYA_{B,R,Z}: output from get_tsnr2_truez()
+                TSNR2_TRUEZNOLYA, TSNR2_TRUEZNOLYA_{B,R,Z}: output from get_tsnr2_truez()
             {camera}_WAVELENGTH: wavelength array (nwave)
             {camera}_IVAR: ivar array (nsim, nwave), from the sky input
             {camera}_RESOLUTION: copy of the values from the sky input
