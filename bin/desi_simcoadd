@@ -1,0 +1,322 @@
+#!/usr/bin/env python
+
+import os
+from time import time
+import numpy as np
+import fitsio
+from astropy.io import fits
+from astropy.table import vstack
+
+#
+from redrock.utils import native_endian
+from desiutil.log import get_logger
+from desispec.io import iotime
+from desispec.io.util import get_tempfilename
+
+#
+from desihiz.simcoadd_utils import (
+    get_outfn,
+    get_skies,
+    read_rrtemplate,
+    get_lsst_bands,
+    get_sim,
+    cameras,
+    fluxunits,
+)
+import multiprocessing
+from argparse import ArgumentParser
+
+
+# AR settings
+my_template_fn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "templates",
+    "lbg",
+    "rrtemplate-lbg.fits",
+)
+# my_sky_coadd_fn = os.path.join(os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "daily", "healpix", "tertiary15-thru20221216", "skies-tertiary15-thru20221216.fits")
+my_sky_coadd_fn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "jura",
+    "healpix",
+    "skies-jura.fits",
+)
+np_rand_seed = 1234
+np.random.seed(np_rand_seed)
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outdir", help="output folder (default=None)", type=str, default=None
+    )
+    parser.add_argument(
+        "--template_fn",
+        help="template file (default={})".format(my_template_fn),
+        type=str,
+        default=my_template_fn,
+    )
+    parser.add_argument(
+        "--template_row",
+        help="index of the template to pick (starting at 0); (default=3)",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
+        "--sky_coadd_fn",
+        help="coadd compiling sky fibers, used to pick the sky ivar from (default={})".format(
+            my_sky_coadd_fn
+        ),
+        type=str,
+        default=my_sky_coadd_fn,
+    )
+    parser.add_argument(
+        "--noise_method",
+        help="flux: pick FLUX values; ivar: draw a value from IVAR; ivarmed: draw a value from IVAR, and add an offset per camera; ivarmed2: draw a value from IVAR, and add an offset per half-camera (default=flux)",
+        type=str,
+        choices=["flux", "ivar", "ivarmed", "ivarmed2"],
+        default="flux",
+    )
+    parser.add_argument(
+        "--rescale_noise_cams",
+        help="comma-separated list of the cameras to rescale the rd noise (default=None)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--rescale_noise_elecs",
+        help="comma-separated list of the rd noise electrons to rescale to (default=None)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--n_per_zmag",
+        help="number of realizations per (z, mag) bin (default=50)",
+        type=int,
+        default=50,
+    )
+    parser.add_argument(
+        "--efftime_min",
+        help="EFFTIME_SPEC in minutes (default=120)",
+        type=int,
+        default=120,
+    )
+    parser.add_argument(
+        "--mag_band",
+        help="filter name used by load_filter()) (default=lsst2016-r)",
+        type=str,
+        default="lsst2016-r",
+    )
+    parser.add_argument(
+        "--mag_min", help="mag_min (default=22.5)", type=float, default=22.5
+    )
+    parser.add_argument(
+        "--mag_max", help="mag_max (default=25.0)", type=float, default=25.0
+    )
+    parser.add_argument(
+        "--mag_bin", help="mag_bin (default=0.5)", type=float, default=0.5
+    )
+    parser.add_argument("--z_min", help="z_min (default=1.5)", type=float, default=2.0)
+    parser.add_argument("--z_max", help="z_max (default=4.5)", type=float, default=4.0)
+    parser.add_argument("--z_bin", help="z_bin (default=0.1)", type=float, default=0.1)
+    parser.add_argument(
+        "--numproc",
+        help="number of concurrent processes to use; (default=1)",
+        type=int,
+        default=1,
+    )
+    parser.add_argument("--overwrite", action="store_true", help="overwrite output file?")
+    args = parser.parse_args()
+    # AR noise-rescaling is not relevant if using noise_method!=flux  I think...
+    if args.rescale_noise_cams is not None:
+        if args.noise_method != "flux":
+            msg = "for now, cannot set both args.noise_method!=flux and args.rescale_noise_cams"
+            log.error(msg)
+            raise ValueError(msg)
+        xs = np.array(args.rescale_noise_cams.split(","))
+        if np.in1d(xs, ["b", "r", "z"]).sum() != xs.size:
+            msg = "args.rescale_noise_cams have to be in b,r,z"
+            log.error(msg)
+            raise ValueError(msg)
+    for kwargs in args._get_kwargs():
+        log.info(kwargs)
+    return args
+
+
+def main():
+
+    # AR
+    args = parse()
+
+    # AR output file
+    outfn = get_outfn(
+        args.outdir,
+        args.template_fn,
+        args.template_row,
+        args.efftime_min,
+        args.noise_method,
+        args.rescale_noise_cams,
+        args.rescale_noise_elecs,
+        args.mag_min,
+        args.mag_max,
+        args.mag_bin,
+        args.z_min,
+        args.z_max,
+        args.z_bin,
+    )
+    log.info("outfn = {}".format(outfn))
+    if os.path.isfile(outfn):
+        if args.overwrite:
+            log.warning("{} already exists and will be overwritten".format(outfn))
+        else:
+            msg = "{} already exists and args.overwrite=False; exiting".format(outfn)
+            log.error(msg)
+            raise ValueError(msg)
+
+    # AR grid of objects
+    mag_grids = np.arange(
+        args.mag_min, args.mag_max + args.mag_bin, args.mag_bin
+    )  # .round(3)
+    mag_ngrid = len(mag_grids)
+    z_grids = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
+    z_ngrid = len(z_grids)
+    #
+    nsim = mag_ngrid * z_ngrid * args.n_per_zmag
+    log.info("mag_grids = {}".format(mag_grids))
+    log.info("z_grids = {}".format(z_grids))
+    log.info("nsim = {}".format(nsim))
+
+    # AR sky: read the sky ivars
+    # AR sky: and rescale if asked
+    # AR TODO : if noise_method!=flux, the rescaling may not be relevant
+    sky = get_skies(
+        args.sky_coadd_fn,
+        args.efftime_min,
+        rescale_noise_cams=args.rescale_noise_cams,
+        rescale_noise_elecs=args.rescale_noise_elecs,
+    )
+
+    # AR template: read the template
+    rf_ws, rf_fs = read_rrtemplate(args.template_fn, args.template_row)
+
+    lsst_bands = get_lsst_bands()
+    # AR loop on mag, z
+    myargs = []
+    for mag in mag_grids:
+        for z in z_grids:
+            myargs.append(
+                [
+                    rf_ws,
+                    rf_fs,
+                    sky,
+                    z,
+                    mag,
+                    args.mag_band,
+                    lsst_bands,
+                    args.n_per_zmag,
+                    np.random.randint(1e9, size=1)[0],
+                    args.noise_method,
+                ]
+            )
+    pool = multiprocessing.Pool(processes=args.numproc)
+    log.info("start pool")
+    with pool:
+        myds = pool.starmap(get_sim, myargs)
+    log.info("pool done")
+
+    # AR stack
+    log.info("start stacking")
+    myd = {}
+    for ext in myds[0].keys():
+        if ext in ["FIBERMAP", "SCORES"]:
+            myd[ext] = vstack([myd_i[ext] for myd_i in myds])
+        elif (ext[2:] == "WAVELENGTH") | (ext[2:] == "RESCALE_VAR"):
+            myd[ext] = myds[0][ext]
+        else:
+            myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
+    myd["FIBERMAP"]["TARGETID"] = np.arange(nsim, dtype=int)
+    myd["SCORES"]["TARGETID"] = myd["FIBERMAP"]["TARGETID"]
+
+    # AR store into fits structure
+    hdus = fits.HDUList()
+    hdus.append(fits.convenience.table_to_hdu(myd["FIBERMAP"]))
+    efm = myd["FIBERMAP"].copy()
+    efm.meta["EXTNAME"] = "EXP_FIBERMAP"
+    hdus.append(fits.convenience.table_to_hdu(efm))
+    for camera in cameras:
+        for ext, ext_units, ext_type in zip(
+            [
+                "{}_WAVELENGTH".format(camera),
+                "{}_FLUX".format(camera),
+                "{}_IVAR".format(camera),
+                "{}_MASK".format(camera),
+                "{}_RESOLUTION".format(camera),
+                "{}_FLUX_NO_NOISE".format(camera),
+                "{}_RESCALE_VAR".format(camera),
+            ],
+            [
+                "Angstrom",
+                fluxunits.to_string(),
+                (fluxunits**-2).to_string(),
+                None,
+                None,
+                fluxunits.to_string(),
+                None,
+            ],
+            ["f8", "f4", "f4", "i4", "f4", "f4", "f4"],
+        ):
+            hdus.append(fits.ImageHDU(myd[ext].astype(ext_type), name=ext))
+            if ext_units is not None:
+                hdus[-1].header["BUNIT"] = ext_units
+    hdus.append(fits.convenience.table_to_hdu(myd["SCORES"]))
+    log.info("stacking done")
+
+    # AR write
+    log.info("start writing")
+    t0 = time()
+    tmpfile = get_tempfilename(outfn)
+    hdus.writeto(tmpfile, overwrite=True, checksum=True)
+    os.rename(tmpfile, outfn)
+    duration = time() - t0
+    # AR update primary header
+    F = fitsio.FITS(outfn, "rw")
+    for argname, key in [
+        ("template_fn", "TMPLFN"),
+        ("template_row", "TMPLROW"),
+        ("sky_coadd_fn", "SKYCOFN"),
+        ("noise_method", "NOISE"),
+        ("n_per_zmag", "NPERZMAG"),
+        ("efftime_min", "EFFTIME"),
+        ("mag_band", "MAGFILT"),
+        ("mag_min", "MAGMIN"),
+        ("mag_max", "MAGMAX"),
+        ("mag_bin", "MAGBIN"),
+        ("z_min", "ZMIN"),
+        ("z_max", "ZMAX"),
+        ("z_bin", "ZBIN"),
+        ("rescale_noise_cams", "RSCCAMS"),
+        ("rescale_noise_elecs", "RSELECS"),
+    ]:
+        F[0].write_key(key, eval("args.{}".format(argname)))
+    # AR add the whole command..
+    cmd = ["desi_simcoadd"]
+    for kwargs in args._get_kwargs():
+        log.info(kwargs)
+        if kwargs[1] is not None:
+            cmd += ["--{}".format(kwargs[0]), str(kwargs[1])]
+    F[0].write_key("RUNCMD", " ".join(cmd))
+    #
+    F.close()
+    log.info(iotime.format("write", outfn, duration))
+
+
+if __name__ == "__main__":
+    main()

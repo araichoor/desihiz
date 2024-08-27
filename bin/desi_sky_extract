@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+
+import os
+from time import time
+import numpy as np
+from astropy.table import Table
+from astropy.io import fits
+from desispec.io import iotime
+from desispec.io.util import get_tempfilename
+from desiutil.log import get_logger
+from argparse import ArgumentParser
+
+
+log = get_logger()
+my_prognums = "15,23,26,37"
+my_prod = "jura"
+my_outfn = (
+    "/global/cfs/cdirs/desi/users/raichoor/laelbg/{}/healpix/skies-{}.fits".format(
+        my_prod, my_prod
+    )
+)
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outfn",
+        help="output file (default={})".format(my_outfn),
+        type=str,
+        default=my_outfn,
+    )
+    parser.add_argument(
+        "--prod",
+        help="spectro prod (default={})".format(my_prod),
+        type=str,
+        default=my_prod,
+    )
+    parser.add_argument(
+        "--prognums",
+        help="comma-separated list of the tertiary PROGNUMs to grab the sky fibers from (default={})".format(
+            my_prognums
+        ),
+        type=str,
+        default=my_prognums,
+    )
+    parser.add_argument(
+        "--wstuck", action="store_true", help="include stuck fibers in the sky fibers?"
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info(kwargs)
+    return args
+
+
+def main():
+
+    t0 = time()
+    args = parse()
+
+    prod_dir = os.path.join(os.getenv("DESI_ROOT"), "spectro", "redux", args.prod)
+
+    # tileids
+    fn = os.path.join(prod_dir, "tiles-{}.csv".format(args.prod))
+    d = Table.read(fn)
+    sel = np.zeros(len(d), dtype=bool)
+    for prognum in args.prognums.split(","):
+        sel |= d["FAFLAVOR"] == "specialtertiary{}".format(prognum)
+    tileids = d["TILEID"][sel]
+
+    # survey, program, pixel
+    fn = os.path.join(prod_dir, "healpix", "tilepix.fits")
+    d = Table.read(fn)
+    sel = np.in1d(d["TILEID"], tileids)
+    d = d[sel]
+
+    # unique coadd fns
+    fns = [
+        os.path.join(
+            prod_dir,
+            "healpix",
+            survey,
+            program,
+            str(pix // 100),
+            str(pix),
+            "coadd-{}-{}-{}.fits".format(survey, program, pix),
+        )
+        for survey, program, pix in zip(d["SURVEY"], d["PROGRAM"], d["HEALPIX"])
+    ]
+    fns = np.unique(fns)
+    print("found {} healpix files for {} tiles".format(len(fns), tileids.size))
+
+    for fn in fns:
+
+        h = fits.open(fn)
+
+        # targetids for our prognums
+        efm = h["EXP_FIBERMAP"].data
+        tids = efm["TARGETID"][np.in1d(efm["TILEID"], tileids)]
+
+        # sky targets
+        fm = h["FIBERMAP"].data
+        sel = np.in1d(fm["TARGETID"], tids)
+        sel &= fm["OBJTYPE"] == "SKY"
+        if not args.wstuck:
+            sel &= fm["TARGETID"] > 0
+            sel &= fm["COADD_FIBERSTATUS"] == 0
+        log.info("{}\t{} sky fibers".format(os.path.basename(fn), sel.sum()))
+        #
+        exts = [h[i].header["EXTNAME"] for i in range(1, len(h))]
+        exts = [
+            ext for ext in exts if ext[2:] != "WAVELENGTH"
+        ]  # AR do not touch WAVELENGTH
+        for ext in exts:
+            if ext in ["EXP_FIBERMAP"]:
+                sel_expfm = np.in1d(h[ext].data["TARGETID"], fm["TARGETID"][sel])
+                h[ext].data = h[ext].data[sel_expfm]
+            else:
+                h[ext].data = h[ext].data[sel]
+        #
+        if fn == fns[0]:
+            myh = h.copy()
+        else:
+            for ext in exts:
+                myh[ext].data = np.append(myh[ext].data, h[ext].data, axis=0)
+    log.info("all_coadds\t{} sky fibers".format(myh["FIBERMAP"].data.size))
+    myh[0].header["PROD"] = args.prod
+    myh[0].header["PRODDIR"] = prod_dir
+    myh[0].header["PROGNUMS"] = args.prognums
+    myh[0].header["WSTUCK"] = args.wstuck
+
+    myh.writeto(args.outfn, overwrite=True)
+    tmpfile = get_tempfilename(args.outfn)
+    myh.writeto(tmpfile, overwrite=True, checksum=True)
+    os.rename(tmpfile, args.outfn)
+    duration = time() - t0
+    log.info(iotime.format("write", args.outfn, duration))
+
+
+if __name__ == "__main__":
+    main()
