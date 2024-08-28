@@ -446,33 +446,45 @@ def get_lsst_bands():
     return ["u", "g", "r", "i", "z", "y"]
 
 
-def get_lsst_mags(ws, fs, bands, year=2023, np_round=2):
+def get_lsst_mags(ws, fs, band, year=2023, np_round=2):
     """
-    Compute the lsst magnitudes for a given spectrum.
+    Compute the magnitudes for a given lsst band.
 
     Args:
         ws: wavelengths (1d array of floats)
-        fs: fluxes (1d array of floats)
-        bands: list of lsst bands (list of str)
+        fs: fluxes (1d or 2d array of floats)
+            if 1d-array, should be (nwave)
+            if 2d-array, should be (nspec, nwave)
+        band: lsst bands (str)
         year (optional, defaults to 2023): speclite version of lsst filters (int)
         np_round (optional, defaults to 2): round mags to np_round digits (int)
 
     Returns:
         mags: the lsst magnitudes (list of floats, same length as bands)
     """
-    # AR template: add noise-free magnitudes
-    mags = []
-    for band in bands:
-        filter_response = load_filter("lsst{}-{}".format(year, band))
-        # AR zero-padding spectrum so that it covers the filter response
-        pad_ws, pad_fs = ws.copy(), fs.copy()
-        if (pad_ws.min() > filter_response.wavelength.min()) | (
-            pad_ws.max() < filter_response.wavelength.max()
-        ):
-            pad_fs, pad_ws = filter_response.pad_spectrum(pad_fs, pad_ws, method="zero")
-        # AR get the mag
-        mag = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
-        mags.append(mag.round(np_round))
+
+    filter_response = load_filter("lsst{}-{}".format(year, band))
+
+    # AR zero-padding spectrum so that it covers the filter response
+    pad_ws, pad_fs = ws.copy(), fs.copy()
+
+    # AR get the mag
+    if len(fs.shape) == 1:
+        pad_fs, pad_ws = filter_response.pad_spectrum(fs, ws, method="zero")
+        mags = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
+    elif len(fs.shape) == 2:
+        assert fs.shape[1] == len(ws)
+        pad_fs, pad_ws = filter_response.pad_spectrum(fs, ws, method="zero", axis=1)
+        mags = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
+    else:
+        msg = "unexpected fs.shape = {}; it should be either (nwave) or (nspec, nwave); exit".format(
+            fs.shape
+        )
+        log.error(msg)
+        raise ValueError(msg)
+
+    mags = mags.round(np_round)
+
     return mags
 
 
@@ -566,7 +578,7 @@ def get_tsnr2_truez(
 
 
 def get_sim(
-    rf_ws, rf_fs, sky, z, mag, mag_band, lsst_bands, nsim, np_rand_seed, noise_method
+    rf_ws, rf_fs, sky, zs, mags, mag_band, lsst_bands, np_rand_seed, noise_method
 ):
     """
     Create a redshifted+rescaled template with realistic noise.
@@ -575,18 +587,17 @@ def get_sim(
         rf_ws: rest-frame wavelengths (1d array of floats)
         rf_fs: rest-frame fluxes (1d array of floats)
         sky: output of get_skies() (Table())
-        z: redshift (float)
-        mag: requested magnitude (float)
+        zs: redshifts (array of floats)
+        mags: requested magnitudes for each redshift (array of floats)
         mag_band: band for the requested magnitude (str)
         lsst_bands: list of lsst bands (list of str)
-        nsim: number of realisations (int)
         np_rand_seed: seed to initialize np.random.seed() (int)
         noise_method: "flux", "ivar", "ivarmed", or "ivarmed2" (str)
 
     Returns:
         myd: dictionary with various entries:
             FIBERMAP: a fibermap-like Table, with the following columns:
-                TRUE_Z: input z
+                TRUE_Z: input zs
                 COADD_FIBERSTATUS: 0
                 OBJTYPE: "TGT"
                 TARGET_RA, TARGET_DEC: 206.56, 57.07 (coordinate with a low EBV)
@@ -609,6 +620,14 @@ def get_sim(
 
     assert noise_method in allowed_noise_method
 
+    zs = np.atleast_1d(zs)
+    mags = np.atleast_1d(mags)
+
+    assert len(zs.shape) == 1
+    assert len(mags.shape) == 1
+    nsim = len(zs)
+    assert len(mags) == nsim
+
     np.random.seed(np_rand_seed)
     nsky = sky["{}_FLUX".format(cameras[0])].shape[0]
     ii_sky = np.random.choice(nsky, size=nsim, replace=True)
@@ -617,7 +636,7 @@ def get_sim(
     myd = {}
     myd["FIBERMAP"] = Table()
     myd["FIBERMAP"].meta["EXTNAME"] = "FIBERMAP"
-    myd["FIBERMAP"]["TRUE_Z"] = z + np.zeros(nsim)
+    myd["FIBERMAP"]["TRUE_Z"] = zs
     # AR add columns required by redrock
     myd["FIBERMAP"]["COADD_FIBERSTATUS"] = 0
     myd["FIBERMAP"]["OBJTYPE"] = "TGT"
@@ -633,29 +652,27 @@ def get_sim(
 
     # AR template: redshift + mag-rescale
     cameras_ws = {camera: sky["{}_WAVELENGTH".format(camera)] for camera in cameras}
-    template_fs = template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band)
+    nws = {camera: cameras_ws[camera].size for camera in cameras}
+    template_fs = {camera: np.zeros(0).reshape(0, nws[camera]) for camera in cameras}
+    for z, mag in zip(zs, mags):
+        tmp_fs = template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band)
+        for camera in cameras:
+            template_fs[camera] = np.append(
+                template_fs[camera], tmp_fs[camera].reshape(1, nws[camera]), axis=0
+            )
 
-    # AR lsst mags (first re-generate a single spectrum...)
-    tmp_ws, tmp_fs = np.zeros(0), np.zeros(0)
-    for camera in cameras:
-        tmp_ws = np.append(tmp_ws, cameras_ws[camera])
-        tmp_fs = np.append(tmp_fs, template_fs[camera])
-    tmp_ws, ii = np.unique(tmp_ws, return_index=True)
-    tmp_fs = tmp_fs[ii]
-    #
-    mags = get_lsst_mags(tmp_ws, tmp_fs, lsst_bands)
-    log.info(
-        "mag={}\tz={}:\t{}".format(
-            mag,
-            z,
-            ",".join(
-                ["{}={:.1f}".format(band, mag) for band, mag in zip(lsst_bands, mags)]
-            ),
-        )
-    )
+    # AR lsst mags
     myd["FIBERMAP"].meta["FILTERS"] = ",".join(lsst_bands)
-    for band, mag in zip(lsst_bands, mags):
-        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = mag
+    for band in lsst_bands:
+        # re-constitute a single array for each spectrum...
+        if band == lsst_bands[0]:
+            tmp_ws = np.hstack([cameras_ws[camera] for camera in cameras])
+            tmp_ws, ii = np.unique(tmp_ws, return_index=True)
+        tmp_fs = np.hstack([template_fs[camera] for camera in cameras])
+        tmp_fs = tmp_fs[:, ii]
+        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(
+            tmp_ws, tmp_fs, band
+        )
 
     # AR template: add noise from a randomly picked sky fiber
     myd["FIBERMAP"]["SKY_TARGETID"] = sky["TARGETID"][ii_sky]
@@ -731,7 +748,7 @@ def get_sim(
         myd["{}_RESCALE_VAR".format(camera)] = sky["{}_RESCALE_VAR".format(camera)]
 
     # AR
-    tsnr2 = get_tsnr2_truez(myd, z + np.zeros(nsim))
+    tsnr2 = get_tsnr2_truez(myd, zs)
     for key in tsnr2.keys():
         myd["SCORES"][key] = tsnr2[key]
     return myd

@@ -128,12 +128,28 @@ def parse():
     parser.add_argument("--z_max", help="z_max (default=4.5)", type=float, default=4.0)
     parser.add_argument("--z_bin", help="z_bin (default=0.1)", type=float, default=0.1)
     parser.add_argument(
+        "--z_pick",
+        help="pick z values on a grid, or in continuous values? (default=grid)",
+        type=str,
+        choices=["grid", "continuous"],
+        default="grid",
+    )
+    parser.add_argument(
+        "--mag_pick",
+        help="pick mag values on a grid, or in continuous values? (default=grid)",
+        type=str,
+        choices=["grid", "continuous"],
+        default="grid",
+    )
+    parser.add_argument(
         "--numproc",
         help="number of concurrent processes to use; (default=1)",
         type=int,
         default=1,
     )
-    parser.add_argument("--overwrite", action="store_true", help="overwrite output file?")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="overwrite output file?"
+    )
     args = parser.parse_args()
     # AR noise-rescaling is not relevant if using noise_method!=flux  I think...
     if args.rescale_noise_cams is not None:
@@ -182,17 +198,13 @@ def main():
             raise ValueError(msg)
 
     # AR grid of objects
-    mag_grids = np.arange(
+    grid_mags = np.arange(
         args.mag_min, args.mag_max + args.mag_bin, args.mag_bin
     )  # .round(3)
-    mag_ngrid = len(mag_grids)
-    z_grids = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
-    z_ngrid = len(z_grids)
+    grid_zs = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
     #
-    nsim = mag_ngrid * z_ngrid * args.n_per_zmag
-    log.info("mag_grids = {}".format(mag_grids))
-    log.info("z_grids = {}".format(z_grids))
-    log.info("nsim = {}".format(nsim))
+    log.info("grid_mags = {}".format(grid_mags))
+    log.info("grid_zs = {}".format(grid_zs))
 
     # AR sky: read the sky ivars
     # AR sky: and rescale if asked
@@ -210,18 +222,34 @@ def main():
     lsst_bands = get_lsst_bands()
     # AR loop on mag, z
     myargs = []
-    for mag in mag_grids:
-        for z in z_grids:
+    for im in range(len(grid_mags)):
+        for iz in range(len(grid_zs)):
+            if args.mag_pick == "grid":
+                mags = grid_mags[im] + np.zeros(args.n_per_zmag)
+            else:
+                if im == len(grid_mags) - 1:
+                    continue
+                mags = np.random.uniform(
+                    low=grid_mags[im], high=grid_mags[im + 1], size=args.n_per_zmag
+                )
+            if args.z_pick == "grid":
+                zs = grid_zs[iz] + np.zeros(args.n_per_zmag)
+            else:
+                if iz == len(grid_zs) - 1:
+                    continue
+                else:
+                    zs = np.random.uniform(
+                        low=grid_zs[iz], high=grid_zs[iz + 1], size=args.n_per_zmag
+                    )
             myargs.append(
                 [
                     rf_ws,
                     rf_fs,
                     sky,
-                    z,
-                    mag,
+                    zs,
+                    mags,
                     args.mag_band,
                     lsst_bands,
-                    args.n_per_zmag,
                     np.random.randint(1e9, size=1)[0],
                     args.noise_method,
                 ]
@@ -242,7 +270,7 @@ def main():
             myd[ext] = myds[0][ext]
         else:
             myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
-    myd["FIBERMAP"]["TARGETID"] = np.arange(nsim, dtype=int)
+    myd["FIBERMAP"]["TARGETID"] = np.arange(len(myd["FIBERMAP"]), dtype=int)
     myd["SCORES"]["TARGETID"] = myd["FIBERMAP"]["TARGETID"]
 
     # AR store into fits structure
