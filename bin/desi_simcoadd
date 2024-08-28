@@ -127,15 +127,29 @@ def parse():
     parser.add_argument("--z_min", help="z_min (default=1.5)", type=float, default=2.0)
     parser.add_argument("--z_max", help="z_max (default=4.5)", type=float, default=4.0)
     parser.add_argument("--z_bin", help="z_bin (default=0.1)", type=float, default=0.1)
-    parser.add_argument("--z_pick", help="pick z values on a grid, or in continuous values? (default=grid)", type=str, choices=["grid", "continuous"], default="grid")
-    parser.add_argument("--mag_pick", help="pick mag values on a grid, or in continuous values? (default=grid)", type=str, choices=["grid", "continuous"], default="grid")
+    parser.add_argument(
+        "--z_pick",
+        help="pick z values on a grid, or in continuous values? (default=grid)",
+        type=str,
+        choices=["grid", "continuous"],
+        default="grid",
+    )
+    parser.add_argument(
+        "--mag_pick",
+        help="pick mag values on a grid, or in continuous values? (default=grid)",
+        type=str,
+        choices=["grid", "continuous"],
+        default="grid",
+    )
     parser.add_argument(
         "--numproc",
         help="number of concurrent processes to use; (default=1)",
         type=int,
         default=1,
     )
-    parser.add_argument("--overwrite", action="store_true", help="overwrite output file?")
+    parser.add_argument(
+        "--overwrite", action="store_true", help="overwrite output file?"
+    )
     args = parser.parse_args()
     # AR noise-rescaling is not relevant if using noise_method!=flux  I think...
     if args.rescale_noise_cams is not None:
@@ -217,14 +231,18 @@ def main():
             else:
                 if im == len(mag_grids) - 1:
                     continue
-                mags = np.random.uniform(low=mag_grids[im], high=mag_grids[im+1], size=args.n_per_zmag)
+                mags = np.random.uniform(
+                    low=mag_grids[im], high=mag_grids[im + 1], size=args.n_per_zmag
+                )
             if args.z_pick == "grid":
                 zs = z_grids[iz] + np.zeros(args.n_per_zmag)
             else:
                 if iz == len(z_grids) - 1:
                     continue
                 else:
-                    zs = np.random.uniform(low=z_grids[iz], high=z_grids[iz+1], size=args.n_per_zmag)
+                    zs = np.random.uniform(
+                        low=z_grids[iz], high=z_grids[iz + 1], size=args.n_per_zmag
+                    )
             myargs.append(
                 [
                     rf_ws,

@@ -657,7 +657,9 @@ def get_sim(
     for z, mag in zip(zs, mags):
         tmp_fs = template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band)
         for camera in cameras:
-            template_fs[camera] = np.append(template_fs[camera], tmp_fs[camera].reshape(1, nws[camera]), axis=0)
+            template_fs[camera] = np.append(
+                template_fs[camera], tmp_fs[camera].reshape(1, nws[camera]), axis=0
+            )
 
     # AR lsst mags
     myd["FIBERMAP"].meta["FILTERS"] = ",".join(lsst_bands)
@@ -668,7 +670,9 @@ def get_sim(
             tmp_ws, ii = np.unique(tmp_ws, return_index=True)
         tmp_fs = np.hstack([template_fs[camera] for camera in cameras])
         tmp_fs = tmp_fs[:, ii]
-        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(tmp_ws, tmp_fs, band)
+        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(
+            tmp_ws, tmp_fs, band
+        )
 
     # AR template: add noise from a randomly picked sky fiber
     myd["FIBERMAP"]["SKY_TARGETID"] = sky["TARGETID"][ii_sky]
