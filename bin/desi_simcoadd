@@ -198,15 +198,13 @@ def main():
             raise ValueError(msg)
 
     # AR grid of objects
-    mag_grids = np.arange(
+    grid_mags = np.arange(
         args.mag_min, args.mag_max + args.mag_bin, args.mag_bin
     )  # .round(3)
-    mag_ngrid = len(mag_grids)
-    z_grids = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
-    z_ngrid = len(z_grids)
+    grid_zs = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
     #
-    log.info("mag_grids = {}".format(mag_grids))
-    log.info("z_grids = {}".format(z_grids))
+    log.info("grid_mags = {}".format(grid_mags))
+    log.info("grid_zs = {}".format(grid_zs))
 
     # AR sky: read the sky ivars
     # AR sky: and rescale if asked
@@ -224,24 +222,24 @@ def main():
     lsst_bands = get_lsst_bands()
     # AR loop on mag, z
     myargs = []
-    for im in range(len(mag_grids)):
-        for iz in range(len(z_grids)):
+    for im in range(len(grid_mags)):
+        for iz in range(len(grid_zs)):
             if args.mag_pick == "grid":
-                mags = mag_grids[im] + np.zeros(args.n_per_zmag)
+                mags = grid_mags[im] + np.zeros(args.n_per_zmag)
             else:
-                if im == len(mag_grids) - 1:
+                if im == len(grid_mags) - 1:
                     continue
                 mags = np.random.uniform(
-                    low=mag_grids[im], high=mag_grids[im + 1], size=args.n_per_zmag
+                    low=grid_mags[im], high=grid_mags[im + 1], size=args.n_per_zmag
                 )
             if args.z_pick == "grid":
-                zs = z_grids[iz] + np.zeros(args.n_per_zmag)
+                zs = grid_zs[iz] + np.zeros(args.n_per_zmag)
             else:
-                if iz == len(z_grids) - 1:
+                if iz == len(grid_zs) - 1:
                     continue
                 else:
                     zs = np.random.uniform(
-                        low=z_grids[iz], high=z_grids[iz + 1], size=args.n_per_zmag
+                        low=grid_zs[iz], high=grid_zs[iz + 1], size=args.n_per_zmag
                     )
             myargs.append(
                 [
