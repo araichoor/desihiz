@@ -446,33 +446,43 @@ def get_lsst_bands():
     return ["u", "g", "r", "i", "z", "y"]
 
 
-def get_lsst_mags(ws, fs, bands, year=2023, np_round=2):
+def get_lsst_mags(ws, fs, band, year=2023, np_round=2):
     """
-    Compute the lsst magnitudes for a given spectrum.
+    Compute the magnitudes for a given lsst band.
 
     Args:
         ws: wavelengths (1d array of floats)
-        fs: fluxes (1d array of floats)
-        bands: list of lsst bands (list of str)
+        fs: fluxes (1d or 2d array of floats)
+            if 1d-array, should be (nwave)
+            if 2d-array, should be (nspec, nwave)
+        band: lsst bands (str)
         year (optional, defaults to 2023): speclite version of lsst filters (int)
         np_round (optional, defaults to 2): round mags to np_round digits (int)
 
     Returns:
         mags: the lsst magnitudes (list of floats, same length as bands)
     """
-    # AR template: add noise-free magnitudes
-    mags = []
-    for band in bands:
-        filter_response = load_filter("lsst{}-{}".format(year, band))
-        # AR zero-padding spectrum so that it covers the filter response
-        pad_ws, pad_fs = ws.copy(), fs.copy()
-        if (pad_ws.min() > filter_response.wavelength.min()) | (
-            pad_ws.max() < filter_response.wavelength.max()
-        ):
-            pad_fs, pad_ws = filter_response.pad_spectrum(pad_fs, pad_ws, method="zero")
-        # AR get the mag
-        mag = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
-        mags.append(mag.round(np_round))
+
+    filter_response = load_filter("lsst{}-{}".format(year, band))
+
+    # AR zero-padding spectrum so that it covers the filter response
+    pad_ws, pad_fs = ws.copy(), fs.copy()
+
+    # AR get the mag
+    if len(fs.shape) == 1:
+        pad_fs, pad_ws = filter_response.pad_spectrum(fs, ws, method="zero")
+        mags = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
+    elif len(fs.shape) == 2:
+        assert fs.shape[1] == len(ws)
+        pad_fs, pad_ws = filter_response.pad_spectrum(fs, ws, method="zero", axis=1)
+        mags = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
+    else:
+        msg = "unexpected fs.shape = {}; it should be either (nwave) or (nspec, nwave); exit".format(
+            fs.shape
+        )
+        log.error(msg)
+        raise ValueError(msg)
+
     return mags
 
 
@@ -643,19 +653,11 @@ def get_sim(
     tmp_ws, ii = np.unique(tmp_ws, return_index=True)
     tmp_fs = tmp_fs[ii]
     #
-    mags = get_lsst_mags(tmp_ws, tmp_fs, lsst_bands)
-    log.info(
-        "mag={}\tz={}:\t{}".format(
-            mag,
-            z,
-            ",".join(
-                ["{}={:.1f}".format(band, mag) for band, mag in zip(lsst_bands, mags)]
-            ),
-        )
-    )
     myd["FIBERMAP"].meta["FILTERS"] = ",".join(lsst_bands)
-    for band, mag in zip(lsst_bands, mags):
-        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = mag
+    for band in lsst_bands:
+        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(
+            tmp_ws, tmp_fs, band
+        )
 
     # AR template: add noise from a randomly picked sky fiber
     myd["FIBERMAP"]["SKY_TARGETID"] = sky["TARGETID"][ii_sky]
