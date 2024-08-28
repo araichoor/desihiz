@@ -483,6 +483,8 @@ def get_lsst_mags(ws, fs, band, year=2023, np_round=2):
         log.error(msg)
         raise ValueError(msg)
 
+    mags = mags.round(np_round)
+
     return mags
 
 
