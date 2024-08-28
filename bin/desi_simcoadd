@@ -127,6 +127,8 @@ def parse():
     parser.add_argument("--z_min", help="z_min (default=1.5)", type=float, default=2.0)
     parser.add_argument("--z_max", help="z_max (default=4.5)", type=float, default=4.0)
     parser.add_argument("--z_bin", help="z_bin (default=0.1)", type=float, default=0.1)
+    parser.add_argument("--z_pick", help="pick z values on a grid, or in continuous values? (default=grid)", type=str, choices=["grid", "continuous"], default="grid")
+    parser.add_argument("--mag_pick", help="pick mag values on a grid, or in continuous values? (default=grid)", type=str, choices=["grid", "continuous"], default="grid")
     parser.add_argument(
         "--numproc",
         help="number of concurrent processes to use; (default=1)",
@@ -189,10 +191,8 @@ def main():
     z_grids = np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin)  # .round(3)
     z_ngrid = len(z_grids)
     #
-    nsim = mag_ngrid * z_ngrid * args.n_per_zmag
     log.info("mag_grids = {}".format(mag_grids))
     log.info("z_grids = {}".format(z_grids))
-    log.info("nsim = {}".format(nsim))
 
     # AR sky: read the sky ivars
     # AR sky: and rescale if asked
@@ -210,18 +210,30 @@ def main():
     lsst_bands = get_lsst_bands()
     # AR loop on mag, z
     myargs = []
-    for mag in mag_grids:
-        for z in z_grids:
+    for im in range(len(mag_grids)):
+        for iz in range(len(z_grids)):
+            if args.mag_pick == "grid":
+                mags = mag_grids[im] + np.zeros(args.n_per_zmag)
+            else:
+                if im == len(mag_grids) - 1:
+                    continue
+                mags = np.random.uniform(low=mag_grids[im], high=mag_grids[im+1], size=args.n_per_zmag)
+            if args.z_pick == "grid":
+                zs = z_grids[iz] + np.zeros(args.n_per_zmag)
+            else:
+                if iz == len(z_grids) - 1:
+                    continue
+                else:
+                    zs = np.random.uniform(low=z_grids[iz], high=z_grids[iz+1], size=args.n_per_zmag)
             myargs.append(
                 [
                     rf_ws,
                     rf_fs,
                     sky,
-                    z,
-                    mag,
+                    zs,
+                    mags,
                     args.mag_band,
                     lsst_bands,
-                    args.n_per_zmag,
                     np.random.randint(1e9, size=1)[0],
                     args.noise_method,
                 ]
@@ -242,7 +254,7 @@ def main():
             myd[ext] = myds[0][ext]
         else:
             myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
-    myd["FIBERMAP"]["TARGETID"] = np.arange(nsim, dtype=int)
+    myd["FIBERMAP"]["TARGETID"] = np.arange(len(myd["FIBERMAP"]), dtype=int)
     myd["SCORES"]["TARGETID"] = myd["FIBERMAP"]["TARGETID"]
 
     # AR store into fits structure

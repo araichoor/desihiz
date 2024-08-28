@@ -576,7 +576,7 @@ def get_tsnr2_truez(
 
 
 def get_sim(
-    rf_ws, rf_fs, sky, z, mag, mag_band, lsst_bands, nsim, np_rand_seed, noise_method
+    rf_ws, rf_fs, sky, zs, mags, mag_band, lsst_bands, np_rand_seed, noise_method
 ):
     """
     Create a redshifted+rescaled template with realistic noise.
@@ -585,18 +585,17 @@ def get_sim(
         rf_ws: rest-frame wavelengths (1d array of floats)
         rf_fs: rest-frame fluxes (1d array of floats)
         sky: output of get_skies() (Table())
-        z: redshift (float)
-        mag: requested magnitude (float)
+        zs: redshifts (array of floats)
+        mags: requested magnitudes for each redshift (array of floats)
         mag_band: band for the requested magnitude (str)
         lsst_bands: list of lsst bands (list of str)
-        nsim: number of realisations (int)
         np_rand_seed: seed to initialize np.random.seed() (int)
         noise_method: "flux", "ivar", "ivarmed", or "ivarmed2" (str)
 
     Returns:
         myd: dictionary with various entries:
             FIBERMAP: a fibermap-like Table, with the following columns:
-                TRUE_Z: input z
+                TRUE_Z: input zs
                 COADD_FIBERSTATUS: 0
                 OBJTYPE: "TGT"
                 TARGET_RA, TARGET_DEC: 206.56, 57.07 (coordinate with a low EBV)
@@ -619,6 +618,14 @@ def get_sim(
 
     assert noise_method in allowed_noise_method
 
+    zs = np.atleast_1d(zs)
+    mags = np.atleast_1d(mags)
+
+    assert len(zs.shape) == 1
+    assert len(mags.shape) == 1
+    nsim = len(zs)
+    assert len(mags) == nsim
+
     np.random.seed(np_rand_seed)
     nsky = sky["{}_FLUX".format(cameras[0])].shape[0]
     ii_sky = np.random.choice(nsky, size=nsim, replace=True)
@@ -627,7 +634,7 @@ def get_sim(
     myd = {}
     myd["FIBERMAP"] = Table()
     myd["FIBERMAP"].meta["EXTNAME"] = "FIBERMAP"
-    myd["FIBERMAP"]["TRUE_Z"] = z + np.zeros(nsim)
+    myd["FIBERMAP"]["TRUE_Z"] = zs
     # AR add columns required by redrock
     myd["FIBERMAP"]["COADD_FIBERSTATUS"] = 0
     myd["FIBERMAP"]["OBJTYPE"] = "TGT"
@@ -643,21 +650,23 @@ def get_sim(
 
     # AR template: redshift + mag-rescale
     cameras_ws = {camera: sky["{}_WAVELENGTH".format(camera)] for camera in cameras}
-    template_fs = template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band)
+    nws = {camera: cameras_ws[camera].size for camera in cameras}
+    template_fs = {camera: np.zeros(0).reshape(0, nws[camera]) for camera in cameras}
+    for z, mag in zip(zs, mags):
+        tmp_fs = template_rf2z(rf_ws, rf_fs, cameras_ws, z, mag, mag_band)
+        for camera in cameras:
+            template_fs[camera] = np.append(template_fs[camera], tmp_fs[camera].reshape(1, nws[camera]), axis=0)
 
-    # AR lsst mags (first re-generate a single spectrum...)
-    tmp_ws, tmp_fs = np.zeros(0), np.zeros(0)
-    for camera in cameras:
-        tmp_ws = np.append(tmp_ws, cameras_ws[camera])
-        tmp_fs = np.append(tmp_fs, template_fs[camera])
-    tmp_ws, ii = np.unique(tmp_ws, return_index=True)
-    tmp_fs = tmp_fs[ii]
-    #
+    # AR lsst mags
     myd["FIBERMAP"].meta["FILTERS"] = ",".join(lsst_bands)
     for band in lsst_bands:
-        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(
-            tmp_ws, tmp_fs, band
-        )
+        # re-constitute a single array for each spectrum...
+        if band == lsst_bands[0]:
+            tmp_ws = np.hstack([cameras_ws[camera] for camera in cameras])
+            tmp_ws, ii = np.unique(tmp_ws, return_index=True)
+        tmp_fs = np.hstack([template_fs[camera] for camera in cameras])
+        tmp_fs = tmp_fs[:, ii]
+        myd["FIBERMAP"]["MAG_{}".format(band.upper())] = get_lsst_mags(tmp_ws, tmp_fs, band)
 
     # AR template: add noise from a randomly picked sky fiber
     myd["FIBERMAP"]["SKY_TARGETID"] = sky["TARGETID"][ii_sky]
@@ -733,7 +742,7 @@ def get_sim(
         myd["{}_RESCALE_VAR".format(camera)] = sky["{}_RESCALE_VAR".format(camera)]
 
     # AR
-    tsnr2 = get_tsnr2_truez(myd, z + np.zeros(nsim))
+    tsnr2 = get_tsnr2_truez(myd, zs)
     for key in tsnr2.keys():
         myd["SCORES"][key] = tsnr2[key]
     return myd
