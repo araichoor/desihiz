@@ -148,7 +148,9 @@ def parse():
         default=1,
     )
     parser.add_argument(
-        "--no_extra", action="store_true", help="do not write the *-extra.fits file, with FLUX_NO_NOISE and RESCALE_VAR",
+        "--no_extra",
+        action="store_true",
+        help="do not write the *-extra.fits file, with FLUX_NO_NOISE and RESCALE_VAR",
     )
     parser.add_argument(
         "--overwrite", action="store_true", help="overwrite output file?"
@@ -201,7 +203,9 @@ def main():
             if args.overwrite:
                 log.warning("{} already exists and will be overwritten".format(myoutfn))
             else:
-                msg = "{} already exists and args.overwrite=False; exiting".format(myoutfn)
+                msg = "{} already exists and args.overwrite=False; exiting".format(
+                    myoutfn
+                )
                 log.error(msg)
                 raise ValueError(msg)
 
@@ -341,7 +345,9 @@ def main():
                 ],
                 ["f8", "f4", "f4"],
             ):
-                extra_hdus.append(fits.ImageHDU(extra_myd[ext].astype(ext_type), name=ext))
+                extra_hdus.append(
+                    fits.ImageHDU(extra_myd[ext].astype(ext_type), name=ext)
+                )
                 if ext_units is not None:
                     extra_hdus[-1].header["BUNIT"] = ext_units
 
