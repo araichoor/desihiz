@@ -148,6 +148,9 @@ def parse():
         default=1,
     )
     parser.add_argument(
+        "--no_extra", action="store_true", help="do not write the *-extra.fits file, with FLUX_NO_NOISE and RESCALE_VAR",
+    )
+    parser.add_argument(
         "--overwrite", action="store_true", help="overwrite output file?"
     )
     args = parser.parse_args()
@@ -190,7 +193,10 @@ def main():
     )
     log.info("outfn = {}".format(outfn))
     extra_outfn = outfn.replace(".fits", "-extra.fits")
-    for myoutfn in [outfn, extra_outfn]:
+    myoutfns = [outfn]
+    if not args.no_extra:
+        myoutfns.append(extra_outfn)
+    for myoutfn in myoutfns:
         if os.path.isfile(myoutfn):
             if args.overwrite:
                 log.warning("{} already exists and will be overwritten".format(myoutfn))
@@ -318,34 +324,35 @@ def main():
     hdus.append(fits.convenience.table_to_hdu(myd["SCORES"]))
 
     # AR store into fits structure: extra_myd
-    extra_hdus = fits.HDUList()
-    extra_hdus.append(fits.convenience.table_to_hdu(extra_myd["FIBERMAP"]))
-    for camera in cameras:
-        for ext, ext_units, ext_type in zip(
-            [
-                "{}_WAVELENGTH".format(camera),
-                "{}_FLUX_NO_NOISE".format(camera),
-                "{}_RESCALE_VAR".format(camera),
-            ],
-            [
-                "Angstrom",
-                fluxunits.to_string(),
-                None,
-            ],
-            ["f8", "f4", "f4"],
-        ):
-            extra_hdus.append(fits.ImageHDU(extra_myd[ext].astype(ext_type), name=ext))
-            if ext_units is not None:
-                extra_hdus[-1].header["BUNIT"] = ext_units
+    if not args.no_extra:
+        extra_hdus = fits.HDUList()
+        extra_hdus.append(fits.convenience.table_to_hdu(extra_myd["FIBERMAP"]))
+        for camera in cameras:
+            for ext, ext_units, ext_type in zip(
+                [
+                    "{}_WAVELENGTH".format(camera),
+                    "{}_FLUX_NO_NOISE".format(camera),
+                    "{}_RESCALE_VAR".format(camera),
+                ],
+                [
+                    "Angstrom",
+                    fluxunits.to_string(),
+                    None,
+                ],
+                ["f8", "f4", "f4"],
+            ):
+                extra_hdus.append(fits.ImageHDU(extra_myd[ext].astype(ext_type), name=ext))
+                if ext_units is not None:
+                    extra_hdus[-1].header["BUNIT"] = ext_units
 
     log.info("stacking done")
 
     # AR write
     log.info("start writing")
-    for myhdus, myoutfn in zip(
-        [hdus, extra_hdus],
-        [outfn, extra_outfn],
-    ):
+    myhduss = [hdus]
+    if not args.no_extra:
+        myhduss.append(extra_hdus)
+    for myhdus, myoutfn in zip(myhduss, myoutfns):
         t0 = time()
         tmpfile = get_tempfilename(myoutfn)
         myhdus.writeto(tmpfile, overwrite=True, checksum=True)
