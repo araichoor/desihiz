@@ -148,6 +148,11 @@ def parse():
         default=1,
     )
     parser.add_argument(
+        "--no_extra",
+        action="store_true",
+        help="do not write the *-extra.fits file, with FLUX_NO_NOISE and RESCALE_VAR",
+    )
+    parser.add_argument(
         "--overwrite", action="store_true", help="overwrite output file?"
     )
     args = parser.parse_args()
@@ -189,13 +194,20 @@ def main():
         args.z_bin,
     )
     log.info("outfn = {}".format(outfn))
-    if os.path.isfile(outfn):
-        if args.overwrite:
-            log.warning("{} already exists and will be overwritten".format(outfn))
-        else:
-            msg = "{} already exists and args.overwrite=False; exiting".format(outfn)
-            log.error(msg)
-            raise ValueError(msg)
+    extra_outfn = outfn.replace(".fits", "-extra.fits")
+    myoutfns = [outfn]
+    if not args.no_extra:
+        myoutfns.append(extra_outfn)
+    for myoutfn in myoutfns:
+        if os.path.isfile(myoutfn):
+            if args.overwrite:
+                log.warning("{} already exists and will be overwritten".format(myoutfn))
+            else:
+                msg = "{} already exists and args.overwrite=False; exiting".format(
+                    myoutfn
+                )
+                log.error(msg)
+                raise ValueError(msg)
 
     # AR grid of objects
     grid_mags = np.arange(
@@ -261,19 +273,32 @@ def main():
     log.info("pool done")
 
     # AR stack
+    # AR store in extra_myd:
+    # AR - flux_no_noise and rescale_var
+    # AR - also add for conveniency fibermap and wavelength
     log.info("start stacking")
-    myd = {}
+    myd, extra_myd = {}, {}
     for ext in myds[0].keys():
-        if ext in ["FIBERMAP", "SCORES"]:
-            myd[ext] = vstack([myd_i[ext] for myd_i in myds])
-        elif (ext[2:] == "WAVELENGTH") | (ext[2:] == "RESCALE_VAR"):
-            myd[ext] = myds[0][ext]
+        if ext == "FIBERMAP":
+            d = vstack([myd_i[ext] for myd_i in myds])
+            tids = np.arange(len(d), dtype=int)
+            d["TARGETID"] = tids
+            myd[ext], extra_myd[ext] = d, d
+        elif ext == "SCORES":
+            d = vstack([myd_i[ext] for myd_i in myds])
+            d["TARGETID"] = tids
+            myd[ext] = d
+        elif ext[2:] == "WAVELENGTH":
+            myd[ext], extra_myd[ext] = myds[0][ext], myds[0][ext]
+        elif ext[2:] == "RESCALE_VAR":
+            extra_myd[ext] = myds[0][ext]
         else:
-            myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
-    myd["FIBERMAP"]["TARGETID"] = np.arange(len(myd["FIBERMAP"]), dtype=int)
-    myd["SCORES"]["TARGETID"] = myd["FIBERMAP"]["TARGETID"]
+            if "FLUX_NO_NOISE" in ext:
+                extra_myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
+            else:
+                myd[ext] = np.vstack([myd_i[ext] for myd_i in myds])
 
-    # AR store into fits structure
+    # AR store into fits structure: myd
     hdus = fits.HDUList()
     hdus.append(fits.convenience.table_to_hdu(myd["FIBERMAP"]))
     efm = myd["FIBERMAP"].copy()
@@ -287,8 +312,6 @@ def main():
                 "{}_IVAR".format(camera),
                 "{}_MASK".format(camera),
                 "{}_RESOLUTION".format(camera),
-                "{}_FLUX_NO_NOISE".format(camera),
-                "{}_RESCALE_VAR".format(camera),
             ],
             [
                 "Angstrom",
@@ -296,54 +319,81 @@ def main():
                 (fluxunits**-2).to_string(),
                 None,
                 None,
-                fluxunits.to_string(),
-                None,
             ],
-            ["f8", "f4", "f4", "i4", "f4", "f4", "f4"],
+            ["f8", "f4", "f4", "i4", "f4"],
         ):
             hdus.append(fits.ImageHDU(myd[ext].astype(ext_type), name=ext))
             if ext_units is not None:
                 hdus[-1].header["BUNIT"] = ext_units
     hdus.append(fits.convenience.table_to_hdu(myd["SCORES"]))
+
+    # AR store into fits structure: extra_myd
+    if not args.no_extra:
+        extra_hdus = fits.HDUList()
+        extra_hdus.append(fits.convenience.table_to_hdu(extra_myd["FIBERMAP"]))
+        for camera in cameras:
+            for ext, ext_units, ext_type in zip(
+                [
+                    "{}_WAVELENGTH".format(camera),
+                    "{}_FLUX_NO_NOISE".format(camera),
+                    "{}_RESCALE_VAR".format(camera),
+                ],
+                [
+                    "Angstrom",
+                    fluxunits.to_string(),
+                    None,
+                ],
+                ["f8", "f4", "f4"],
+            ):
+                extra_hdus.append(
+                    fits.ImageHDU(extra_myd[ext].astype(ext_type), name=ext)
+                )
+                if ext_units is not None:
+                    extra_hdus[-1].header["BUNIT"] = ext_units
+
     log.info("stacking done")
 
     # AR write
     log.info("start writing")
-    t0 = time()
-    tmpfile = get_tempfilename(outfn)
-    hdus.writeto(tmpfile, overwrite=True, checksum=True)
-    os.rename(tmpfile, outfn)
-    duration = time() - t0
-    # AR update primary header
-    F = fitsio.FITS(outfn, "rw")
-    for argname, key in [
-        ("template_fn", "TMPLFN"),
-        ("template_row", "TMPLROW"),
-        ("sky_coadd_fn", "SKYCOFN"),
-        ("noise_method", "NOISE"),
-        ("n_per_zmag", "NPERZMAG"),
-        ("efftime_min", "EFFTIME"),
-        ("mag_band", "MAGFILT"),
-        ("mag_min", "MAGMIN"),
-        ("mag_max", "MAGMAX"),
-        ("mag_bin", "MAGBIN"),
-        ("z_min", "ZMIN"),
-        ("z_max", "ZMAX"),
-        ("z_bin", "ZBIN"),
-        ("rescale_noise_cams", "RSCCAMS"),
-        ("rescale_noise_elecs", "RSELECS"),
-    ]:
-        F[0].write_key(key, eval("args.{}".format(argname)))
-    # AR add the whole command..
-    cmd = ["desi_simcoadd"]
-    for kwargs in args._get_kwargs():
-        log.info(kwargs)
-        if kwargs[1] is not None:
-            cmd += ["--{}".format(kwargs[0]), str(kwargs[1])]
-    F[0].write_key("RUNCMD", " ".join(cmd))
-    #
-    F.close()
-    log.info(iotime.format("write", outfn, duration))
+    myhduss = [hdus]
+    if not args.no_extra:
+        myhduss.append(extra_hdus)
+    for myhdus, myoutfn in zip(myhduss, myoutfns):
+        t0 = time()
+        tmpfile = get_tempfilename(myoutfn)
+        myhdus.writeto(tmpfile, overwrite=True, checksum=True)
+        os.rename(tmpfile, myoutfn)
+        duration = time() - t0
+        # AR update primary header
+        F = fitsio.FITS(myoutfn, "rw")
+        for argname, key in [
+            ("template_fn", "TMPLFN"),
+            ("template_row", "TMPLROW"),
+            ("sky_coadd_fn", "SKYCOFN"),
+            ("noise_method", "NOISE"),
+            ("n_per_zmag", "NPERZMAG"),
+            ("efftime_min", "EFFTIME"),
+            ("mag_band", "MAGFILT"),
+            ("mag_min", "MAGMIN"),
+            ("mag_max", "MAGMAX"),
+            ("mag_bin", "MAGBIN"),
+            ("z_min", "ZMIN"),
+            ("z_max", "ZMAX"),
+            ("z_bin", "ZBIN"),
+            ("rescale_noise_cams", "RSCCAMS"),
+            ("rescale_noise_elecs", "RSELECS"),
+        ]:
+            F[0].write_key(key, eval("args.{}".format(argname)))
+        # AR add the whole command..
+        cmd = ["desi_simcoadd"]
+        for kwargs in args._get_kwargs():
+            log.info(kwargs)
+            if kwargs[1] is not None:
+                cmd += ["--{}".format(kwargs[0]), str(kwargs[1])]
+        F[0].write_key("RUNCMD", " ".join(cmd))
+        #
+        F.close()
+        log.info(iotime.format("write", myoutfn, duration))
 
 
 if __name__ == "__main__":
