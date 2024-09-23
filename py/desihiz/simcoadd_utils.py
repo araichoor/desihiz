@@ -419,7 +419,7 @@ def rescale_template2mag(ws, fs, mag, mag_band, verbose=False):
     if (pad_ws.min() > filter_response.wavelength.min()) | (
         pad_ws.max() < filter_response.wavelength.max()
     ):
-        pad_ws, pad_fs = filter_response.pad_spectrum(pad_fs, pad_ws, method="zero")
+        pad_fs, pad_ws = filter_response.pad_spectrum(pad_fs, pad_ws, method="zero")
     # AR now scale
     orig_mag = filter_response.get_ab_magnitude(pad_fs * fluxunits, pad_ws)
     scalefac = 10 ** ((orig_mag - mag) / 2.5)
