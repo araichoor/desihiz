@@ -391,6 +391,56 @@ def get_clauds_cosmos_yr2_infos():
     return mydict
 
 
+def get_clauds_cosmos_yr3_infos():
+    """
+    Get the minimal photometric infos for CLAUDS cosmos_yr3 (tertiary37)
+
+    Args:
+        None
+
+    Returns:
+        mydict: dictionary with {keys: arrays},
+            with keys: TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION
+
+    Notes:
+        The LBG_UNIONS_NEW,LBG_UNIONS_REOBS target selection is done on clauds photometry
+            degraded to the UNION depths; I do not have this photometry at hand.
+        We will propagate the CLAUDS photometry.
+        Same, I do not know which one is UGR or USGR, so I consider everything as UGR.
+        Also, the (RA, DEC) should be the exact same ones as in CLAUDS, except for the
+            targets coming from higher-priority selections (from suprime, hsc).
+    """
+    #
+    fadir = os.path.join(
+        os.getenv("DESI_ROOT"), "survey", "fiberassign", "special", "tertiary", "0037"
+    )
+
+    # first read the tertiary37 file
+    fn = os.path.join(fadir, "tertiary-targets-0037-assign.fits")
+    d = Table.read(fn)
+
+    # cut on lbg targets
+    sel = np.zeros(len(d), dtype=bool)
+    for name in ["LBG_UNIONS_NEW", "LBG_UNIONS_REOBS"]:
+        sel |= d[name]
+    d = d[sel]
+
+    d["PHOT_SELECTION"] = "COSMOS_YR3_UNIONS"
+
+    nrows = [len(d), 0, 0]
+    mydict = get_init_infos("clauds", nrows)
+
+    for band in ["UGR"]:
+
+        mydict[band]["TARGETID"] = d["TARGETID"]
+        mydict[band]["TERTIARY_TARGET"] = d["TERTIARY_TARGET"]
+        mydict[band]["PHOT_RA"] = d["RA"]
+        mydict[band]["PHOT_DEC"] = d["DEC"]
+        mydict[band]["PHOT_SELECTION"] = d["PHOT_SELECTION"]
+
+    return mydict
+
+
 # get photometry infos (clauds_id)
 # this is for clauds targets only
 # sky/std will have dummy values
@@ -548,11 +598,17 @@ def get_clauds_phot_infos(case, d, photdir=None, v2=None):
                         "LAE_SUB4OBS",
                         "LAE_ODI4OBS",
                     ],
+                    "COSMOS_YR3_UNIONS": [
+                        "LBG_SUPRIME_NEW",
+                        "LBG_SUPRIME_2H_NEW",
+                        "LBG_HSC_NEW",
+                        "LBG_HSC_REOBS",
+                    ],
                 }
 
                 photnames = d["PHOT_SELECTION"][ii_band][iid][sel_diff].astype(str)
                 ischecked = np.zeros(len(tertiary_targets), dtype=bool)
-                for photname in list(hip_targs.keys()):
+                for photname in hip_targs:
                     sel = np.array([photname in _ for _ in photnames])
                     log.info(
                         "{}\t{}\t{} in PHOT_SELECTION\thip_targs={}\tnp.unique(tertiary_targets)={}".format(
