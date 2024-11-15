@@ -214,16 +214,16 @@ def get_specprod(case):
 
 
 # same for odin or suprime
-def get_specdir(img, case):
+def get_specdirs(img, case):
     """
-    Get the folder with the spectroscopic (healpix) reduction
+    Get the folder(s) with the spectroscopic (healpix) reduction
 
     Args:
         img: element from allowed_imgs (str)
         case: round of DESI observation (str)
 
     Returns:
-        specdir: the folder full path (str)
+        specdirs: list the folder full path (list of str)
     """
     assert img in allowed_imgs
     assert case in allowed_img_cases[img]
@@ -235,43 +235,48 @@ def get_specdir(img, case):
 
         if case == "cosmos_yr1":
 
-            casedir = "tileid82636-thru20220324-v2"
+            casedirs = ["tileid82636-thru20220324-v2"]
 
         if case == "xmmlss_yr2":
 
-            casedir = "tertiary18-thru20230112-v2"
+            casedirs = ["tertiary18-thru20230112-v2"]
 
         if case == "cosmos_yr2":
 
-            casedir = "tertiary26-thru20230416-v2"
+            casedirs = ["tertiary26-thru20230416-v2"]
 
     if img == "suprime":
 
         if case == "cosmos_yr2":
 
-            casedir = "tertiary26-thru20230416-v2"
+            casedirs = ["tertiary26-thru20230416-v2"]
 
         if case == "cosmos_yr3":
 
-            casedir = "tertiary37-thru20240309-loa"
+            casedirs = ["tertiary37-thru20240309-loa"]
 
     if img == "clauds":
 
         if case == "cosmos_yr1":
 
-            casedir = "tileid80871-80872-thru20210512-v2"
+            casedirs = [
+                "tileid80871-80872-thru20210512-v2",
+                "tileid82636-thru20220324-v2",
+            ]
 
         if case == "xmmlss_yr2":
 
-            casedir = "tertiary15-thru20221216-v2"
+            casedirs = ["tertiary15-thru20221216-v2"]
 
         if case == "cosmos_yr2":
 
-            casedir = "tertiary26-thru20230416-v2"
+            casedirs = ["tertiary26-thru20230416-v2"]
 
-    specdir = os.path.join(spec_rootdir, specprod, "healpix", casedir)
+    specdirs = [
+        os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
+    ]
 
-    return specdir
+    return specdirs
 
 
 # ODIN: https://github.com/moustakas/fastspecfit-projects/blob/main/tertiary/deep-photometry.ipynb
@@ -628,30 +633,26 @@ def get_coaddfns(img, case):
         coaddfns: list of filenames (list of str)
 
     Notes:
-        This uses get_specdir(), i.e. gets coadds from custom reductions,
+        This uses get_specdirs(), i.e. gets coadds from custom reductions,
             as the daily pipeline does not produce healpix reductions
     """
     assert img in allowed_imgs
     assert case in allowed_img_cases[img]
 
-    specdir = get_specdir(img, case)
+    specdirs = get_specdirs(img, case)
 
-    if img in ["odin", "clauds"]:
+    if "cosmos" in case:
+        pattern = "coadd-27???.fits"
+    elif "xmmlss" in case:
+        pattern = "coadd-17???.fits"
+    else:
+        msg = "unexpected case = {}".format(case)
+        log.error(msg)
+        raise ValueError(msg)
 
-        if case == "cosmos_yr1":
-
-            coaddfns = sorted(glob(os.path.join(specdir, "coadd-27???.fits")))
-
-    if img in ["odin", "clauds"]:
-
-        if case == "xmmlss_yr2":
-            coaddfns = sorted(glob(os.path.join(specdir, "coadd-17???.fits")))
-
-    if img in ["odin", "suprime", "clauds"]:
-
-        if case in ["cosmos_yr2", "cosmos_yr3"]:
-
-            coaddfns = sorted(glob(os.path.join(specdir, "coadd-27???.fits")))
+    coaddfns = np.hstack(
+        [sorted(glob(os.path.join(specdir, pattern))) for specdir in specdirs]
+    )
 
     for coaddfn in coaddfns:
 
@@ -1365,11 +1366,14 @@ def get_expids(img, case):
     )
 
     d = Table.read(fn)
-    specdir = get_specdir(img, case)
-    fn = os.path.join(specdir, "exposures.fits")
-    expids = Table.read(fn, "EXPOSURES")["EXPID"]
-    sel = np.in1d(d["EXPID"], expids)
-    assert sel.sum() == expids.size
+    specdirs = get_specdirs(img, case)
+    sel = np.zeros(len(d), dtype=bool)
+    for specdir in specdirs:
+        fn = os.path.join(specdir, "exposures.fits")
+        expids = Table.read(fn, "EXPOSURES")["EXPID"]
+        sel2 = np.in1d(d["EXPID"], expids)
+        assert sel2.sum() == expids.size
+        sel |= sel2
     d = d[sel]
 
     return d
@@ -2263,7 +2267,9 @@ def build_hs(
                 )
             )
             h.header["CASES"] = ",".join(cases)
-            h.header["SPECDIRS"] = ",".join([get_specdir(img, case) for case in cases])
+            h.header["SPECDIRS"] = ",".join(
+                np.hstack([get_specdirs(img, case) for case in cases])
+            )
             fns = get_vi_fns(img)
             h.header["VIFNS"] = ",".join(fns)
 
