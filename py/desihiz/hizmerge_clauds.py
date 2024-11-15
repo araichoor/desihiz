@@ -65,7 +65,7 @@ def get_clauds_cosmos_yr1_infos():
         os.path.join(mydir, "DESILBG_BXU_FINAL.fits"),
         os.path.join(mydir, "DESILBG_TMG_FINAL.fits"),
         os.path.join(mydir, "LBG_TOMOG_COSMOS_FINAL.fits"),
-        os.path.join(mydir2, "ToO.ecsv")
+        os.path.join(mydir2, "ToO.ecsv"),
     ]
     photnames = [
         "COSMOS_YR1_BXU",

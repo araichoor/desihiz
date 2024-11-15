@@ -261,7 +261,7 @@ def get_specdirs(img, case):
 
             casedirs = [
                 "tileid80871-80872-thru20210512-v2",
-                "tileid82636-thru20220324-v2"
+                "tileid82636-thru20220324-v2",
             ]
 
         if case == "xmmlss_yr2":
@@ -273,8 +273,7 @@ def get_specdirs(img, case):
             casedirs = ["tertiary26-thru20230416-v2"]
 
     specdirs = [
-        os.path.join(spec_rootdir, specprod, "healpix", casedir)
-        for casedir in casedirs
+        os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
     ]
 
     return specdirs
@@ -2268,7 +2267,9 @@ def build_hs(
                 )
             )
             h.header["CASES"] = ",".join(cases)
-            h.header["SPECDIRS"] = ",".join(np.hstack([get_specdirs(img, case) for case in cases]))
+            h.header["SPECDIRS"] = ",".join(
+                np.hstack([get_specdirs(img, case) for case in cases])
+            )
             fns = get_vi_fns(img)
             h.header["VIFNS"] = ",".join(fns)
 
