@@ -292,7 +292,11 @@ def get_suprime_cosmos_yr3_infos():
 
     # row-match
     rows = -99 + np.zeros(len(d), dtype=int)
-    for key in ["LBG_SUPRIME_NEW_ROW", "LBG_SUPRIME_2H_NEW_ROW", "LBG_SUPRIME_REOBS_ROW"]:
+    for key in [
+        "LBG_SUPRIME_NEW_ROW",
+        "LBG_SUPRIME_2H_NEW_ROW",
+        "LBG_SUPRIME_REOBS_ROW",
+    ]:
         sel = (d[key] != -99) & (rows == -99)
         sel2 = (d[key] != -99) & (rows != -99)
         assert np.all(d[key][sel2] == rows[sel2])
@@ -306,8 +310,8 @@ def get_suprime_cosmos_yr3_infos():
     sel = d["PRIORITY_INIT"] >= 7500
     assert np.all(t["RA"][sel] == d["RA"][sel])
     assert np.all(t["DEC"][sel] == d["DEC"][sel])
-    d_cs = SkyCoord(ra = d["RA"] * units.deg, dec = d["DEC"] * units.deg, frame="icrs")
-    t_cs = SkyCoord(ra = t["RA"] * units.deg, dec = t["DEC"] * units.deg, frame="icrs")
+    d_cs = SkyCoord(ra=d["RA"] * units.deg, dec=d["DEC"] * units.deg, frame="icrs")
+    t_cs = SkyCoord(ra=t["RA"] * units.deg, dec=t["DEC"] * units.deg, frame="icrs")
     sel = d["PRIORITY_INIT"] < 7500
     assert d_cs[sel].separation(t_cs[sel]).to(units.arcsec).value.max() < 1.0
 

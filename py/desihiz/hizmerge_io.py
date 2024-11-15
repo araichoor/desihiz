@@ -78,9 +78,7 @@ def get_img_dir(img):
         imgdir: folder path (str)
     """
     assert img in allowed_imgs
-    imgdir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img
-    )
+    imgdir = os.path.join(os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img)
     return imgdir
 
 
@@ -430,7 +428,7 @@ def get_vi_fns(img):
         fns = [
             os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
             os.path.join(mydir, "FINAL_VI_ODIN_N419_20231129.fits"),
-            os.path.join(mydir, "FINAL_VI_ODIN_N673_20240507.fits")
+            os.path.join(mydir, "FINAL_VI_ODIN_N673_20240507.fits"),
         ]
 
     if img == "suprime":
@@ -1446,7 +1444,9 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
             mydict["cosmos_yr2_{}".format(tmpband)] = [os.path.join(photdir, basefn)]
             # no I427 selection for tertiary37
             if tmpband != "I427":
-                mydict["cosmos_yr3_{}".format(tmpband)] = [os.path.join(photdir, basefn)]
+                mydict["cosmos_yr3_{}".format(tmpband)] = [
+                    os.path.join(photdir, basefn)
+                ]
 
     # clauds
     if img == "clauds":
