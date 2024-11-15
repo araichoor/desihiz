@@ -603,7 +603,7 @@ def get_clauds_phot_infos(case, d, photdir=None, v2=None):
                         "LBG_SUPRIME_2H_NEW",
                         "LBG_HSC_NEW",
                         "LBG_HSC_REOBS",
-                   ]
+                    ],
                 }
 
                 photnames = d["PHOT_SELECTION"][ii_band][iid][sel_diff].astype(str)
