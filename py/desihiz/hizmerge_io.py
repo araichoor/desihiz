@@ -33,7 +33,7 @@ allowed_imgs = ["odin", "suprime", "clauds"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2", "cosmos_yr3"],
-    "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
+    "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3"],
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -264,6 +264,10 @@ def get_specdirs(img, case):
         if case == "cosmos_yr2":
 
             casedirs = ["tertiary26-thru20230416-loa"]
+
+        if case == "cosmos_yr3":
+
+            casedirs = ["tertiary37-thru20240309-loa"]
 
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
@@ -757,6 +761,7 @@ def get_img_infos(img, case, stdsky):
                 get_clauds_cosmos_yr1_infos,
                 get_clauds_xmmlss_yr2_infos,
                 get_clauds_cosmos_yr2_infos,
+                get_clauds_cosmos_yr3_infos,
             )
 
             if case == "cosmos_yr1":
@@ -765,6 +770,8 @@ def get_img_infos(img, case, stdsky):
                 mydict = get_clauds_xmmlss_yr2_infos()
             if case == "cosmos_yr2":
                 mydict = get_clauds_cosmos_yr2_infos()
+            if case == "cosmos_yr3":
+                mydict = get_clauds_cosmos_yr3_infos()
 
     bands = get_img_bands(img)
     for band in bands:
@@ -1454,6 +1461,7 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
             "xmmlss_yr2_USGR": [get_clauds_fn("xmmlss_yr2", v2=v2, uband="uS")],
             "cosmos_yr2_UGR": [get_clauds_fn("cosmos_yr2", v2=v2, uband="u")],
             "cosmos_yr2_USGR": [get_clauds_fn("cosmos_yr2", v2=v2, uband="uS")],
+            "cosmos_yr3_UGR": [get_clauds_fn("cosmos_yr3", v2=v2, uband="u")],
         }
 
     if "{}_{}".format(case, band) in mydict:
