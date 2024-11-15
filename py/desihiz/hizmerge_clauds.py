@@ -26,7 +26,7 @@ log = get_logger()
 
 def get_clauds_cosmos_yr1_infos():
     """
-    Get the minimal photometric infos for CLAUDS cosmos_yr1 (TILEID=80871,80872)
+    Get the minimal photometric infos for CLAUDS cosmos_yr1 (TILEID=80871,80872,82636)
 
     Args:
         None
@@ -41,6 +41,12 @@ def get_clauds_cosmos_yr1_infos():
         LBG_TOMOG_COSMOS_FINAL.fits has some duplicated targetids (maybe that s expected, don t know),
             but none of those made it into 80871,80872; so we simplify things downstream
             with retaining only one row for each
+        Nov. 2024: 82636 u-drop LBG added; 595 spectra; though note that 366/595 are duplicated
+            from existing spectra in desi-clauds.fits, but with a different TARGETID; but as
+            this desi-clauds.fits file already has such duplicates, it is ok
+                also these 82636 targets were selected with a mix of UGR and USGR (see
+            Christophe s email from 2022-03-24 3:45AM), but I cannot recover the origin
+            for each target; so I consider all of them with UGR
     """
     #
     photdtype = get_init_infos("clauds", [0, 0, 0])["UGR"]["PHOT_SELECTION"].dtype
@@ -50,23 +56,33 @@ def get_clauds_cosmos_yr1_infos():
     mydir = os.path.join(
         os.getenv("DESI_TARGET"), "secondary", "sv1", "outdata", "0.52.0", "dark"
     )
+    mydir2 = os.path.join(
+        os.getenv("DESI_ROOT"), "survey", "fiberassign", "special", "20220324"
+    )
 
     # UGR (BXU, TMG, TOMOG_COSMOS)
     fns = [
         os.path.join(mydir, "DESILBG_BXU_FINAL.fits"),
         os.path.join(mydir, "DESILBG_TMG_FINAL.fits"),
         os.path.join(mydir, "LBG_TOMOG_COSMOS_FINAL.fits"),
+        os.path.join(mydir2, "ToO.ecsv")
     ]
     photnames = [
         "COSMOS_YR1_BXU",
         "COSMOS_YR1_TMG",
         "COSMOS_YR1_TOMOG_COSMOS",
+        "COSMOS_YR1_UDROP",
     ]
     ds = []
 
     for fn, photname in zip(fns, photnames):
 
-        d = Table(fitsio.read(fn))
+        if photname == "COSMOS_YR1_UDROP":
+            d = Table.read(fn)
+            sel = d["PRIORITY_INIT"] == 7500
+            d = d[sel]
+        else:
+            d = Table(fitsio.read(fn))
 
         # duplicates in LBG_TOMOG_COSMOS_FINAL.fits
         if os.path.basename(fn) == "LBG_TOMOG_COSMOS_FINAL.fits":
@@ -79,9 +95,14 @@ def get_clauds_cosmos_yr1_infos():
             )
             d = d[ii]
 
-        d["TERTIARY_TARGET"] = os.path.basename(fn).split(os.path.extsep)[0]
+        if photname == "COSMOS_YR1_UDROP":
+            d["TERTIARY_TARGET"] = "LBG_UDROP"
+        else:
+            d["TERTIARY_TARGET"] = os.path.basename(fn).split(os.path.extsep)[0]
         d["PHOT_SELECTION"] = np.zeros(len(d), dtype=photdtype)
         d["PHOT_SELECTION"] = photname
+        # need to cut columns, as ToO.ecsv has a different set
+        d = d["TARGETID", "TERTIARY_TARGET", "RA", "DEC", "PHOT_SELECTION"]
         ds.append(d)
 
     myds["UGR"] = vstack(ds)
