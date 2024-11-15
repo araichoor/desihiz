@@ -195,20 +195,13 @@ def get_specprod(case):
 
     Returns:
         specprod: the spectroscopic production (str)
+
+    Notes:
+        Nov. 2024: switch everything to loa
     """
     assert case in allowed_cases
 
-    if case == "cosmos_yr1":
-
-        specprod = "iron"
-
-    elif case == "cosmos_yr3":
-
-        specprod = "loa"
-
-    else:
-
-        specprod = "daily"
+    specprod = "loa"
 
     return specprod
 
@@ -235,21 +228,21 @@ def get_specdirs(img, case):
 
         if case == "cosmos_yr1":
 
-            casedirs = ["tileid82636-thru20220324-v2"]
+            casedirs = ["tileid82636-thru20220324-loa"]
 
         if case == "xmmlss_yr2":
 
-            casedirs = ["tertiary18-thru20230112-v2"]
+            casedirs = ["tertiary18-thru20230112-loa"]
 
         if case == "cosmos_yr2":
 
-            casedirs = ["tertiary26-thru20230416-v2"]
+            casedirs = ["tertiary26-thru20230416-loa"]
 
     if img == "suprime":
 
         if case == "cosmos_yr2":
 
-            casedirs = ["tertiary26-thru20230416-v2"]
+            casedirs = ["tertiary26-thru20230416-loa"]
 
         if case == "cosmos_yr3":
 
@@ -260,17 +253,17 @@ def get_specdirs(img, case):
         if case == "cosmos_yr1":
 
             casedirs = [
-                "tileid80871-80872-thru20210512-v2",
-                "tileid82636-thru20220324-v2",
+                "tileid80871-80872-thru20210512-loa",
+                "tileid82636-thru20220324-loa",
             ]
 
         if case == "xmmlss_yr2":
 
-            casedirs = ["tertiary15-thru20221216-v2"]
+            casedirs = ["tertiary15-thru20221216-loa"]
 
         if case == "cosmos_yr2":
 
-            casedirs = ["tertiary26-thru20230416-v2"]
+            casedirs = ["tertiary26-thru20230416-loa"]
 
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
