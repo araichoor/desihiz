@@ -32,7 +32,7 @@ log = get_logger()
 allowed_imgs = ["odin", "suprime", "clauds"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
-    "suprime": ["cosmos_yr2"],
+    "suprime": ["cosmos_yr2", "cosmos_yr3"],
     "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
 }
 allowed_cases = []
@@ -78,9 +78,7 @@ def get_img_dir(img):
         imgdir: folder path (str)
     """
     assert img in allowed_imgs
-    imgdir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img
-    )
+    imgdir = os.path.join(os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", img)
     return imgdir
 
 
@@ -204,6 +202,10 @@ def get_specprod(case):
 
         specprod = "iron"
 
+    elif case == "cosmos_yr3":
+
+        specprod = "loa"
+
     else:
 
         specprod = "daily"
@@ -248,6 +250,10 @@ def get_specdir(img, case):
         if case == "cosmos_yr2":
 
             casedir = "tertiary26-thru20230416-v2"
+
+        if case == "cosmos_yr3":
+
+            casedir = "tertiary37-thru20240309-loa"
 
     if img == "clauds":
 
@@ -422,13 +428,17 @@ def get_vi_fns(img):
         fns = [
             os.path.join(mydir, "FINAL_VI_ODIN_N501_20231012.fits"),
             os.path.join(mydir, "FINAL_VI_ODIN_N419_20231129.fits"),
-            os.path.join(mydir, "FINAL_VI_ODIN_N673_20240507.fits")
+            os.path.join(mydir, "FINAL_VI_ODIN_N673_20240507.fits"),
         ]
 
     if img == "suprime":
 
         mydir = os.path.join(get_img_dir("suprime"), "vi")
-        fns = [os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz")]
+        fns = [
+            os.path.join(mydir, "FINAL_VI_Subaru_COSMOS_v20230803.fits.gz"),
+            os.path.join(mydir, "all_VI_Subaru_COSMOS_tertiary37.fits.gz"),
+            os.path.join(mydir, "all_VI_COSMOS_LBG_CLAUDS.fits.gz"),
+        ]
 
     if img == "clauds":
 
@@ -466,19 +476,26 @@ def read_vi_fn(fn):
     # - suprime: add dummy VI_SPECTYPE_FINAL
     # - rename columns
     if (basename in basenames["odin"]) | (basename in basenames["suprime"]):
-        key_olds = [
-            "VI_Z_FINAL",
-            "VI_QUALITY_FINAL",
-            "VI_SPECTYPE_FINAL",
-            "VI_COMMENTS_FINAL",
-        ]
-        key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
-        if basename in basenames["odin"]:
-            key_olds = ["VI_TARGETID"] + key_olds
-            key_news = ["TARGETID"] + key_news
-        if basename in basenames["suprime"]:
-            d["VI_SPECTYPE_FINAL"] = np.zeros(len(d), dtype="<U10")
-            log.info("{}\t: add dummy VI_SPECTYPE_FINAL".format(basename))
+        if basename in [
+            "all_VI_Subaru_COSMOS_tertiary37.fits.gz",
+            "all_VI_COSMOS_LBG_CLAUDS.fits.gz",
+        ]:
+            key_olds = ["VI_TARGETID", "VI_COMMENT"]
+            key_news = ["TARGETID", "VI_COMMENTS"]
+        else:
+            key_olds = [
+                "VI_Z_FINAL",
+                "VI_QUALITY_FINAL",
+                "VI_SPECTYPE_FINAL",
+                "VI_COMMENTS_FINAL",
+            ]
+            key_news = ["VI_Z", "VI_QUALITY", "VI_SPECTYPE", "VI_COMMENTS"]
+            if basename in basenames["odin"]:
+                key_olds = ["VI_TARGETID"] + key_olds
+                key_news = ["TARGETID"] + key_news
+            if basename in basenames["suprime"]:
+                d["VI_SPECTYPE_FINAL"] = np.zeros(len(d), dtype="<U10")
+                log.info("{}\t: add dummy VI_SPECTYPE_FINAL".format(basename))
         for key_old, key_new in zip(key_olds, key_news):
             d[key_old].name = key_new
             log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
@@ -632,7 +649,7 @@ def get_coaddfns(img, case):
 
     if img in ["odin", "suprime", "clauds"]:
 
-        if case == "cosmos_yr2":
+        if case in ["cosmos_yr2", "cosmos_yr3"]:
 
             coaddfns = sorted(glob(os.path.join(specdir, "coadd-27???.fits")))
 
@@ -730,11 +747,15 @@ def get_img_infos(img, case, stdsky):
 
         if img == "suprime":
 
-            from desihiz.hizmerge_suprime import get_suprime_cosmos_yr2_infos
+            from desihiz.hizmerge_suprime import (
+                get_suprime_cosmos_yr2_infos,
+                get_suprime_cosmos_yr3_infos,
+            )
 
             if case == "cosmos_yr2":
-
                 mydict = get_suprime_cosmos_yr2_infos()
+            if case == "cosmos_yr3":
+                mydict = get_suprime_cosmos_yr3_infos()
 
         if img == "clauds":
 
@@ -1418,10 +1439,14 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
         else:
 
             basefn = "Subaru_tractor_forced_all.fits.gz"
-        mydict = {
-            "cosmos_yr2_{}".format(band): [os.path.join(photdir, basefn)]
-            for band in get_img_bands("suprime")
-        }
+        mydict = {}
+        for tmpband in get_img_bands("suprime"):
+            mydict["cosmos_yr2_{}".format(tmpband)] = [os.path.join(photdir, basefn)]
+            # no I427 selection for tertiary37
+            if tmpband != "I427":
+                mydict["cosmos_yr3_{}".format(tmpband)] = [
+                    os.path.join(photdir, basefn)
+                ]
 
     # clauds
     if img == "clauds":
@@ -2034,6 +2059,8 @@ def get_spec_table(img, case, stack_s, mydict):
                 vi = read_vi_fn(fn)
 
                 # we beforehand removed possible duplicates in the vi catalog
+                # TODO
+                # well, actually maybe not true for suprime/cosmos_yr3...
                 for iiband in iibands:
 
                     iivi = np.where(vi["TARGETID"] == d["TARGETID"][iiband])[0]

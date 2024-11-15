@@ -244,6 +244,167 @@ def get_suprime_cosmos_yr2_infos():
     return mydict
 
 
+def get_suprime_cosmos_yr3_infos():
+    """
+    Get the minimal photometric infos for SUPRIME cosmos_yr3 (tertiary37)
+
+    Args:
+        None
+
+
+    Returns:
+        mydict: dictionary with {keys: arrays},
+            with keys: TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION
+    """
+    fadir = os.path.join(
+        os.getenv("DESI_ROOT"), "survey", "fiberassign", "special", "tertiary", "0037"
+    )
+
+    bands = get_img_bands("suprime")
+
+    # first read the tertiary37 file
+    fn = os.path.join(fadir, "tertiary-targets-0037-assign.fits")
+    d = Table.read(fn)
+
+    # cut on suprime targets
+    sel = (d["LBG_SUPRIME_NEW"]) | (d["LBG_SUPRIME_2H_NEW"]) | (d["LBG_SUPRIME_REOBS"])
+    d = d[sel]
+
+    # initialize (with grabbing correct datamodel)
+    tmpdict = get_init_infos("suprime", [len(d), 0, 0, 0, 0])[bands[0]]
+
+    for key in ["PHOT_RA", "PHOT_DEC", "PHOT_SELECTION"]:
+
+        d[key] = tmpdict[key]
+
+    for band in bands:
+
+        d[band] = False
+
+    # to handle bytes / str differences downstream...
+    empty_suprime_selection = d["PHOT_SELECTION"][0]
+
+    log.info("# CHECKER BAND NTARG")
+
+    # Anand s targets file
+    fn = os.path.join(fadir, "inputcats", "cosmos_yr3-lbg-suprime.fits")
+    t = Table(fitsio.read(fn))
+
+    # row-match
+    rows = -99 + np.zeros(len(d), dtype=int)
+    for key in [
+        "LBG_SUPRIME_NEW_ROW",
+        "LBG_SUPRIME_2H_NEW_ROW",
+        "LBG_SUPRIME_REOBS_ROW",
+    ]:
+        sel = (d[key] != -99) & (rows == -99)
+        sel2 = (d[key] != -99) & (rows != -99)
+        assert np.all(d[key][sel2] == rows[sel2])
+        rows[sel] = d[key][sel]
+    assert np.all(rows != -99)
+    t = t[rows]
+
+    # sanity check
+    # - PRIORITY_INIT = 8000,7500 -> targets from suprime, top-priority
+    # - lower PRIORITY_INIT -> targets can be from unions, 1-arsec-radius max
+    sel = d["PRIORITY_INIT"] >= 7500
+    assert np.all(t["RA"][sel] == d["RA"][sel])
+    assert np.all(t["DEC"][sel] == d["DEC"][sel])
+    d_cs = SkyCoord(ra=d["RA"] * units.deg, dec=d["DEC"] * units.deg, frame="icrs")
+    t_cs = SkyCoord(ra=t["RA"] * units.deg, dec=t["DEC"] * units.deg, frame="icrs")
+    sel = d["PRIORITY_INIT"] < 7500
+    assert d_cs[sel].separation(t_cs[sel]).to(units.arcsec).value.max() < 1.0
+
+    # get suprime_ra, suprime_dec
+    d["PHOT_RA"], d["PHOT_DEC"] = t["RA"], t["DEC"]
+
+    # get band + selection
+    for band in bands:
+
+        # no I427 selection for cosmos_yr3
+        if band == "I427":
+            continue
+
+        ii = np.where(t["SEL_{}".format(band)])[0]
+
+        if ii.size == 0:
+
+            continue
+
+        d[band][ii] = True
+        selname = "AR_{}".format(band)
+        for i in ii:
+
+            if d["PHOT_SELECTION"][i] == empty_suprime_selection:
+
+                d["PHOT_SELECTION"][i] = selname
+
+            else:
+
+                d["PHOT_SELECTION"][i] += "; {}".format(selname)
+
+        log.info("AR\t{}\t{}".format(band, ii.size))
+
+    # sanity check
+    ## all rows are filled
+    assert np.all(d["TERTIARY_TARGET"] != 0)
+    assert np.all(d["PHOT_RA"] != 0)
+    assert np.all(d["PHOT_DEC"] != 0)
+    assert np.all(d["PHOT_SELECTION"] != empty_suprime_selection)
+    ## - if TERTIARY_TARGET=LBG_SUPRIME_NEW,LBG_SUPRIME_2H_NEW:
+    ##       (ra, dec) should be exactly the same
+    ##   else:
+    ##       (ra, dec) are those from higher priority catalog
+    ##       and should be within 1 arcsec
+    sel = np.array(
+        [
+            _ == "LBG_SUPRIME_NEW" or _ == "LBG_SUPRIME_2H_NEW"
+            for _ in d["TERTIARY_TARGET"]
+        ]
+    )
+    fa_cs = SkyCoord(d["RA"] * units.degree, d["DEC"] * units.degree, frame="icrs")
+    suprime_cs = SkyCoord(
+        d["PHOT_RA"] * units.degree, d["PHOT_DEC"] * units.degree, frame="icrs"
+    )
+    seps = fa_cs.separation(suprime_cs).to("arcsec").value
+    assert np.all(seps[sel] == 0)
+    assert np.all(seps[~sel] < 1)
+
+    #
+    mydict = get_init_infos("suprime", [d[band].sum() for band in bands])
+
+    for band in bands:
+
+        # no I427 selection for cosmos_yr3
+        if band == "I427":
+            continue
+
+        sel = d[band]
+        mydict[band]["TARGETID"] = d["TARGETID"][sel]
+        mydict[band]["TERTIARY_TARGET"] = d["TERTIARY_TARGET"][sel]
+        mydict[band]["PHOT_RA"] = d["RA"][sel]
+        mydict[band]["PHOT_DEC"] = d["DEC"][sel]
+        mydict[band]["PHOT_SELECTION"] = d["PHOT_SELECTION"][sel].astype(
+            mydict[band]["PHOT_SELECTION"].dtype
+        )
+
+    ## check
+    for band in bands:
+
+        names, counts = np.unique(d["TERTIARY_TARGET"][d[band]], return_counts=True)
+        log.info(
+            "{} ({}):\t{}".format(
+                band,
+                d[band].sum(),
+                ", ".join(
+                    ["{}={}".format(name, count) for name, count in zip(names, counts)]
+                ),
+            )
+        )
+
+    return mydict
+
+
 # get photometry infos (targetid, brickname, objid)
 # this is for suprime targets only
 # sky/std will have dummy values
@@ -344,7 +505,7 @@ def get_suprime_phot_infos(case, d, photdir=None, v2=False):
             # - I527: 0/98
             # for those, we let the bricknames, objids, targfns empty
 
-            if not v2:
+            if (case == "cosmos_yr2") & (not v2):
 
                 sel_diff = d2d != 0
 
@@ -405,18 +566,36 @@ def get_suprime_phot_infos(case, d, photdir=None, v2=False):
             objids[iid] = t["OBJID"][iit]
             targfns[iid] = fn
 
-        # not_v2 : verify all objects are matched
-        # v2 : verify the expected non-matched
+        # cosmos_yr2:
+        # - not v2 : verify all objects are matched
+        # - v2 : verify the expected non-matched
+        # cosmos_yr3:
+        # - not v2: one no-matching for I527
+        # - v2: all objects are matched
+        n_nomatch = 0
+        if case == "cosmos_yr2":
 
-        if v2:
+            if v2:
 
-            n_nomatch = {
-                "I427": 6,
-                "I464": 27,
-                "I484": 9,
-                "I505": 18,
-                "I527": 0,
-            }[band]
+                n_nomatch = {
+                    "I427": 6,
+                    "I464": 27,
+                    "I484": 9,
+                    "I505": 18,
+                    "I527": 0,
+                }[band]
+
+        elif case == "cosmos_yr3":
+
+            if not v2:
+
+                n_nomatch = {
+                    "I427": 0,
+                    "I464": 0,
+                    "I484": 0,
+                    "I505": 0,
+                    "I527": 1,
+                }[band]
 
         else:
 
