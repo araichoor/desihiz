@@ -486,9 +486,13 @@ def read_vi_fn(fn):
     log.info("{}\t: read {} rows".format(basename, len(d)))
 
     # expected file names per img
-    basenames = {
-        img: [os.path.basename(_) for _ in get_vi_fns(img)] for img in allowed_imgs
-    }
+    basenames = {}
+    for img in allowed_imgs:
+        fns = get_vi_fns(img)
+        if fns is None:
+            basenames[img] = None
+        else:
+            basenames[img] = [os.path.basename(_) for _ in get_vi_fns(img)]
 
     # odin, suprime
     # - suprime: add dummy VI_SPECTYPE_FINAL
