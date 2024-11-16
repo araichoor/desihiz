@@ -62,11 +62,12 @@ def get_hscwide_cosmos_yr3_infos():
     # - for TERTIARY_TARGET=LBG_HSC_NEW,LBG_HSC_REOBS: (ra, dec) should be exactly the same
     # - for TERTIARY_TARGET=LBG_SUPRIME_NEW,LBG_SUPRIME_2H_NEW : (ra, dec) are those from higher priority catalog
     #       and should be within 1 arcsec
-    sel = (d["TERTIARY_TARGET"] == "LBG_HSC_NEW") | (d["TERTIARY_TARGET"] == "LBG_HSC_REOBS")
+    sel = (d["TERTIARY_TARGET"] == "LBG_HSC_NEW") | (
+        d["TERTIARY_TARGET"] == "LBG_HSC_REOBS"
+    )
     assert np.all(
         (d["TERTIARY_TARGET"][~sel] == "LBG_SUPRIME_NEW")
-        |
-        (d["TERTIARY_TARGET"][~sel] == "LBG_SUPRIME_2H_NEW")
+        | (d["TERTIARY_TARGET"][~sel] == "LBG_SUPRIME_2H_NEW")
     )
     dcs = SkyCoord(d["RA"] * units.degree, d["DEC"] * units.degree, frame="icrs")
     tcs = SkyCoord(t["RA"] * units.degree, t["DEC"] * units.degree, frame="icrs")

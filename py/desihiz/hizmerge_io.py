@@ -990,7 +990,9 @@ def read_targfn(targfn):
             # magnitude (without gal. extinction)
             mags = p["{}_CMODEL_MAG".format(band)]
             # valid values
-            sel = (p["{}_CMODEL_MAG".format(band)] > 0) & (p["{}_CMODEL_MAGERR".format(band)] > 0)
+            sel = (p["{}_CMODEL_MAG".format(band)] > 0) & (
+                p["{}_CMODEL_MAGERR".format(band)] > 0
+            )
             # flux and flux_ivar in nanomaggies
             p["FLUX_{}".format(band)][sel] = 10 ** (-0.4 * (mags[sel] - 22.5))
             p["FLUX_IVAR_{}".format(band)][sel] = (
@@ -1535,7 +1537,9 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
     if img == "hscwide":
 
         mydict = {
-            "cosmos_yr3_GRIZ": [os.path.join(photdir, "cosmos-spring2024-hscwide-data.fits")],
+            "cosmos_yr3_GRIZ": [
+                os.path.join(photdir, "cosmos-spring2024-hscwide-data.fits")
+            ],
         }
 
     if "{}_{}".format(case, band) in mydict:
@@ -1756,7 +1760,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         from desihiz.hizmerge_hscwide import get_hscwide_phot_infos
 
         d["OBJECT_ID"], d["FILENAME"] = get_hscwide_phot_infos(
-            case, specinfo_table, photdir,
+            case,
+            specinfo_table,
+            photdir,
         )
 
     # propagating columns from specinfo_table
