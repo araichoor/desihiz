@@ -2122,12 +2122,13 @@ def get_spec_table(img, case, stack_s, mydict):
     log.info("remove from FIBERMAP: {}".format(rmvcols))
     d.remove_columns(rmvcols)
 
+    # commented out, deprecated with loa
     ## fix some columns (due to buggy desispec code
     ##  when it was run)
-    log.info("")
-    log.info("fix some columns (due to buggy desispec code when it was run)")
-    log.info("")
-    d = fix_fibermap(d, Table(stack_s.exp_fibermap))
+    #log.info("")
+    #log.info("fix some columns (due to buggy desispec code when it was run)")
+    #log.info("")
+    #d = fix_fibermap(d, Table(stack_s.exp_fibermap))
 
     ## add csv-list of expids
     log.info("")
