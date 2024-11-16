@@ -29,11 +29,12 @@ from desiutil.log import get_logger
 log = get_logger()
 
 # allowed values
-allowed_imgs = ["odin", "suprime", "clauds"]
+allowed_imgs = ["odin", "suprime", "clauds", "hscwide"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2", "cosmos_yr3"],
     "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3"],
+    "hscwide": ["cosmos_yr3"],
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -110,6 +111,10 @@ def get_img_bands(img):
 
         bands = ["UGR", "USGR", "GRI"]
 
+    if img == "hscwide":
+
+        bands = ["GRIZ"]
+
     return bands
 
 
@@ -151,6 +156,7 @@ def get_bb_img(fn):
         "ODIN_N419_tractor_HSC_forced_all.fits.gz",
         "Subaru_tractor_forced_all.fits.gz",
         "Subaru_tractor_forced_all-redux-20231025.fits",
+        "cosmos-spring2024-hscwide-data.fits",
     ]:
 
         bb_img = "HSC"
@@ -269,6 +275,12 @@ def get_specdirs(img, case):
 
             casedirs = ["tertiary37-thru20240309-loa"]
 
+    if img == "hscwide":
+
+        if case == "cosmos_yr3":
+
+            casedirs = ["tertiary37-thru20240309-loa"]
+
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
     ]
@@ -342,6 +354,10 @@ def get_ext_coeffs(img):
     if img == "clauds":
 
         mydict = {_: tmpdict[_] for _ in ["CLAUDS"]}
+
+    if img == "hscwide":
+
+        mydict = {_: tmpdict[_] for _ in ["HSC"]}
 
     return mydict
 
@@ -422,7 +438,7 @@ def get_vi_fns(img):
     """
     assert img in allowed_imgs
 
-    fn = None
+    fns = None
 
     if img == "odin":
 
@@ -667,7 +683,8 @@ def get_init_infos(img, nrows):
     Args:
         img: element from allowed_imgs (str)
         nrows: nband-element array with the number of objects per band
-                (for ODIN: 3-element array; for SUPRIME: 5-element array)
+                (for ODIN: 3-element array; for SUPRIME: 5-element array,
+                for HSC-Wide: 1-element array)
 
     Returns:
         mydict: a dictionary with the following structure:
@@ -772,6 +789,15 @@ def get_img_infos(img, case, stdsky):
                 mydict = get_clauds_cosmos_yr2_infos()
             if case == "cosmos_yr3":
                 mydict = get_clauds_cosmos_yr3_infos()
+
+        if img == "hscwide":
+
+            from desihiz.hizmerge_hscwide import (
+                get_hscwide_cosmos_yr3_infos,
+            )
+
+            if case == "cosmos_yr3":
+                mydict = get_hscwide_cosmos_yr3_infos()
 
     bands = get_img_bands(img)
     for band in bands:
@@ -937,6 +963,47 @@ def read_targfn(targfn):
         log.info(
             "{}: remove FLAG_FIELD_BINARY, add FLAG_FIELD_BINARY_INT".format(basename)
         )
+
+    # HSC-Wide:
+    # - add an EBV column
+    # - rename photoz_best -> HSC_ZPHOT
+    # - convert mags and magerr to nanomaggies
+    if basename in [
+        "cosmos-spring2024-hscwide-data.fits",
+    ]:
+
+        for key in p.colnames:
+
+            p[key].name = key.upper()
+
+        # EBV
+        p["EBV"] = p["A_G"] / get_ext_coeffs("hscwide")["HSC"]["G"]
+
+        # HSC_ZPHOT
+        p["PHOTOZ_BEST"].name = "HSC_ZPHOT"
+
+        for band in ["G", "R", "I", "Z", "Y"]:
+
+            # initializing with non-valid photometry values
+            p["FLUX_{}".format(band)] = -99.0
+            p["FLUX_IVAR_{}".format(band)] = 0.0
+            # magnitude (without gal. extinction)
+            mags = p["{}_CMODEL_MAG".format(band)]
+            # valid values
+            sel = (p["{}_CMODEL_MAG".format(band)] > 0) & (p["{}_CMODEL_MAGERR".format(band)] > 0)
+            # flux and flux_ivar in nanomaggies
+            p["FLUX_{}".format(band)][sel] = 10 ** (-0.4 * (mags[sel] - 22.5))
+            p["FLUX_IVAR_{}".format(band)][sel] = (
+                np.log(10)
+                / 2.5
+                * p["{}_CMODEL_MAGERR".format(band)][sel]
+                * p["FLUX_{}".format(band)][sel]
+            ) ** -2.0
+            log.info(
+                "{}: convert {}_CMODEL_MAG and {}_CMODEL_MAGERR to FLUX_{} (nanomaggies) and FLUX_IVAR_{}".format(
+                    basename, band, band, band, band
+                )
+            )
 
     log.info("{} colnames: {}".format(basename, ", ".join(p.colnames)))
 
@@ -1464,6 +1531,13 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
             "cosmos_yr3_UGR": [get_clauds_fn("cosmos_yr3", v2=v2, uband="u")],
         }
 
+    # hscwide
+    if img == "hscwide":
+
+        mydict = {
+            "cosmos_yr3_GRIZ": [os.path.join(photdir, "cosmos-spring2024-hscwide-data.fits")],
+        }
+
     if "{}_{}".format(case, band) in mydict:
 
         return mydict["{}_{}".format(case, band)]
@@ -1592,6 +1666,26 @@ def get_phot_init_table(img, n):
             ("FLAG_FIELD_BINARY_INT", ">i4"),
         ]
 
+    if img in ["hscwide"]:
+
+        # various columns
+        dtype += [
+            ("OBJECT_ID", ">i8"),
+            ("RA", ">f8"),
+            ("DEC", ">f8"),
+            ("EBV", ">f4"),
+            ("I_EXTENDEDNESS_VALUE", ">f4"),
+            ("HSC_ZPHOT", ">f4"),
+        ]
+
+        # img fluxs + depths
+        for band in ["G", "R", "I", "Z", "Y"]:
+
+            dtype += [
+                ("FLUX_{}".format(band), ">f4"),
+                ("FLUX_IVAR_{}".format(band), ">f4"),
+            ]
+
     t = Table(np.zeros(n, dtype=dtype))
 
     return t
@@ -1657,6 +1751,14 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             case, specinfo_table, photdir, v2=v2
         )
 
+    if img == "hscwide":
+
+        from desihiz.hizmerge_hscwide import get_hscwide_phot_infos
+
+        d["OBJECT_ID"], d["FILENAME"] = get_hscwide_phot_infos(
+            case, specinfo_table, photdir,
+        )
+
     # propagating columns from specinfo_table
     keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]
 
@@ -1673,6 +1775,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         )
     if img in ["clauds"]:
         d_unqids = d["ID"].copy()
+
+    if img in ["hscwide"]:
+        d_unqids = d["OBJECT_ID"].copy()
 
     targfns = np.unique(d["FILENAME"])
     log.info("targfns = {}".format(", ".join(targfns)))
@@ -1698,6 +1803,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             ignore_keys += ["BRICKNAME", "OBJID"]
         if img in ["clauds"]:
             ignore_keys += ["ID"]
+        if img in ["hscwide"]:
+            ignore_keys += ["OBJECT_ID"]
 
         for key in d.colnames:
 
@@ -1725,6 +1832,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             )
         if img in ["clauds"]:
             p_unqids = p["ID"].copy()
+        if img in ["hscwide"]:
+            p_unqids = p["OBJECT_ID"].copy()
 
         _, ii = np.unique(p_unqids, return_index=True)
 
@@ -1750,6 +1859,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             assert np.all(p["OBJID"] == dcut["OBJID"])
         if img in ["clauds"]:
             assert np.all(p["ID"] == dcut["ID"])
+        if img in ["hscwide"]:
+            assert np.all(p["OBJECT_ID"] == dcut["OBJECT_ID"])
 
         if img in ["odin", "suprime"]:
             # easy columns..
@@ -1818,6 +1929,14 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                 dcut[key] = p[key]
 
+        if img in ["hscwide"]:
+
+            dcut["BB_IMG"] = get_bb_img(targfn)
+
+            for key in p.colnames:
+
+                dcut[key] = p[key]
+
         # update d
         d[iid] = dcut
 
@@ -1832,6 +1951,10 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             sel |= d[band]
 
     if img in ["clauds"]:
+
+        sel = np.ones(len(d), dtype=bool)
+
+    if img in ["hscwide"]:
 
         sel = np.ones(len(d), dtype=bool)
 
@@ -2055,7 +2178,10 @@ def get_spec_table(img, case, stack_s, mydict):
         iibands = np.where(sel)[0]
         #
         fns = get_vi_fns(img)
-        log.info("vi_fns = {}".format(", ".join(fns)))
+        if fns is None:
+            log.info("vi_fns = None")
+        else:
+            log.info("vi_fns = {}".format(", ".join(fns)))
 
         if fns is not None:
 
@@ -2272,7 +2398,10 @@ def build_hs(
                 np.hstack([get_specdirs(img, case) for case in cases])
             )
             fns = get_vi_fns(img)
-            h.header["VIFNS"] = ",".join(fns)
+            if fns is None:
+                h.header["VIFNS"] = "None"
+            else:
+                h.header["VIFNS"] = ",".join(fns)
 
         # PHOTINFO, PHOTV2INFO: cases, ext. coeffs (a bit hacky...), zphot fns
         if extname in ["PHOTINFO", "PHOTV2INFO"]:
