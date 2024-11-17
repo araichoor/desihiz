@@ -16,7 +16,7 @@ from astropy.time import Time
 
 from desitarget.targetmask import desi_mask
 from desispec.io import read_spectra, write_spectra
-from desispec.coaddition import coadd_cameras, coadd_fibermap
+from desispec.coaddition import coadd_cameras, coadd_fibermap, use_for_coadd
 from desispec.spectra import stack as spectra_stack
 from desispec.fiberbitmasking import (
     get_all_fiberbitmask_with_amp,
@@ -486,9 +486,13 @@ def read_vi_fn(fn):
     log.info("{}\t: read {} rows".format(basename, len(d)))
 
     # expected file names per img
-    basenames = {
-        img: [os.path.basename(_) for _ in get_vi_fns(img)] for img in allowed_imgs
-    }
+    basenames = {}
+    for img in allowed_imgs:
+        fns = get_vi_fns(img)
+        if fns is None:
+            basenames[img] = None
+        else:
+            basenames[img] = [os.path.basename(_) for _ in get_vi_fns(img)]
 
     # odin, suprime
     # - suprime: add dummy VI_SPECTYPE_FINAL
@@ -666,7 +670,6 @@ def get_coaddfns(img, case):
     coaddfns = np.hstack(
         [sorted(glob(os.path.join(specdir, pattern))) for specdir in specdirs]
     )
-
     for coaddfn in coaddfns:
 
         log.info(coaddfn)
@@ -1375,7 +1378,7 @@ def fix_fibermap(fm, exp_fm):
     return fm
 
 
-# https://github.com/desihub/desispec/blob/cfdbdab7444dbaaba6fd49ed813663ebbe401793/py/desispec/coaddition.py#L250-L257
+# https://github.com/desihub/desispec/blob/47053e3c477a5b7407053de6ad01ebb3bee4da40/py/desispec/coaddition.py#L318-L328
 def get_csv_expids(fm, exp_fm):
     """
     Get for each row the list of exposures that went in for a coadd
@@ -1385,22 +1388,32 @@ def get_csv_expids(fm, exp_fm):
 
     Returns:
         csv_expids: comma-separated list of EXPIDs (array of str)
+
+    Notes:
+        The check good_coadds vs. COADD_NUMEXP is a bit convoluted, because
+            some sky targets appear on different coadds (for tileids 80871-2 and 82363);
+            hence we need to restric to exposures from the considered coadd.
     """
     # - Only a subset of "good" FIBERSTATUS flags are included in the coadd
-    fiberstatus_nonamp_bits = get_all_nonamp_fiberbitmask_val()
-    fiberstatus_amp_bits = get_justamps_fiberbitmask()
     # plan 30 6-digits exposures (tertiary26 has 27 exposures max)
     csv_expids = np.zeros(len(fm), dtype="|U209")
 
-    for i, (tid, conexp) in enumerate(zip(fm["TARGETID"], fm["COADD_NUMEXP"])):
+    # list of expids for each coadd
+    coexpids = {
+        cofn: np.unique(fitsio.read(cofn, "EXP_FIBERMAP", columns="EXPID"))
+        for cofn in np.unique(fm["COADDFN"])
+    }
 
-        sel = exp_fm["TARGETID"] == tid
+    for i, (tid, conexp, cofn) in enumerate(zip(fm["TARGETID"], fm["COADD_NUMEXP"], fm["COADDFN"])):
+
+        sel = (exp_fm["TARGETID"] == tid) & (np.in1d(exp_fm["EXPID"], coexpids[cofn]))
         fsts, expids = exp_fm["FIBERSTATUS"][sel], exp_fm["EXPID"][sel]
         assert np.unique(expids).size == len(expids)
 
-        nonamp_fiberstatus_flagged = (fsts & fiberstatus_nonamp_bits) > 0
-        allamps_flagged = (fsts & fiberstatus_amp_bits) == fiberstatus_amp_bits
-        good_coadds = np.bitwise_not(nonamp_fiberstatus_flagged | allamps_flagged)
+        in_coadd_b = use_for_coadd(fsts, "b")
+        in_coadd_r = use_for_coadd(fsts, "r")
+        in_coadd_z = use_for_coadd(fsts, "z")
+        good_coadds = (in_coadd_b | in_coadd_r | in_coadd_z)
         assert good_coadds.sum() == conexp
 
         expids = expids[good_coadds]
@@ -2118,12 +2131,13 @@ def get_spec_table(img, case, stack_s, mydict):
     log.info("remove from FIBERMAP: {}".format(rmvcols))
     d.remove_columns(rmvcols)
 
+    # commented out, deprecated with loa
     ## fix some columns (due to buggy desispec code
     ##  when it was run)
-    log.info("")
-    log.info("fix some columns (due to buggy desispec code when it was run)")
-    log.info("")
-    d = fix_fibermap(d, Table(stack_s.exp_fibermap))
+    #log.info("")
+    #log.info("fix some columns (due to buggy desispec code when it was run)")
+    #log.info("")
+    #d = fix_fibermap(d, Table(stack_s.exp_fibermap))
 
     ## add csv-list of expids
     log.info("")
