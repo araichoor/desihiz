@@ -527,7 +527,7 @@ def plot_selection_spectra(
     for i in range(ii.size):
 
         wis = ws / (1 + s["VI_Z"][i])
-        smfs = get_smooth(fs[i], ivs[i], 3)
+        smfs, _ = get_smooth(fs[i], ivs[i], 3)
         ax.plot(wis, smfs, **kwargs)
 
     ax.grid()
