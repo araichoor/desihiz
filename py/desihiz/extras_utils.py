@@ -183,7 +183,7 @@ def get_zelda_rescale(fs, ivs, mod_fs):
     return sls[i]
 
 
-def make_plot(
+def zelda_make_plot(
     outpng,
     zelda_model,
     zelda_geometry,
@@ -227,7 +227,7 @@ def make_plot(
         color="g",
         label="lyapeak_z={:.4f}".format(z_peak),
     )
-    ax.axvline(wave_lya * (1 + z), ls="--", color="c", label="vi_z={:.4f}".format(z))
+    ax.axvline(wave_lya * (1 + z), ls="--", color="c", label="input_z={:.4f}".format(z))
     ax.axvline(
         wave_lya * (1 + zelda_z50),
         ls="--",
@@ -245,13 +245,13 @@ def make_plot(
     ax.set_xlim((wave_lya - 18.5) * (1 + z), (wave_lya + 18.5) * (1 + z))
     ax.grid()
     ax.set_ylim(-0.5, 6)
-    x0, x1, y, dy = 0.60, 0.85, 0.95, -0.05
+    x0, x1, y, dy = 0.55, 0.85, 0.95, -0.05
     for txt0, txt1 in [
         ["model(zelda)", zelda_model.capitalize()],
         ["geometry(zelda)", geometry_dict[zelda_geometry]],
-        ["obs_offset(zelda - vi)", "{:.1f} A".format(wave_lya * (zelda_z50 - z))],
+        ["obs_offset(zelda - input)", "{:.1f} A".format(wave_lya * (zelda_z50 - z))],
         [
-            "rf_offset(zelda - vi)",
+            "rf_offset(zelda - input)",
             "{:.1f} A".format(wave_lya * (zelda_z50 - z) / (1 + z)),
         ],
         ["rchi2", "{:.1f}".format(rchi2)],
@@ -438,7 +438,7 @@ def get_zelda_fit_one_spectrum(
 
     # plot?
     if outpng is not None:
-        make_plot(
+        zelda_make_plot(
             outpng,
             zelda_model,
             zelda_geometry,
