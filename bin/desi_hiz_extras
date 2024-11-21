@@ -1,0 +1,190 @@
+#!/usr/bin/env python
+
+
+import os
+import numpy as np
+from astropy.io import fits
+from astropy.table import Table, vstack
+from desiutil.log import get_logger
+from desiutil.redirect import stdouterr_redirected
+from desihiz.extras_utils import (
+    allowed_extras,
+    get_rr,
+    get_rrkeys,
+    get_default_zelda_dirs,
+    get_zelda_fit,
+)
+from argparse import ArgumentParser
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--mergefn",
+        help="merge fits filename (default=None)",
+        type=str,
+        required=True,
+        default=None,
+    )
+    parser.add_argument(
+        "--extras",
+        help="comma-separated list of extras (default={})".format(
+            ",".join(allowed_extras)
+        ),
+        type=str,
+        default=",".join(allowed_extras),
+    )
+    parser.add_argument(
+        "--rrsubdir",
+        help="sub-folder name (relative to where the coadds are) where redrock files are (default=rr2023oct)",
+        type=str,
+        default="rr2023oct",
+    )
+    parser.add_argument(
+        "--dchi2_0_min",
+        help="DELTACHI2 threshold to pick Z_1 if OII/Lya confusion (default=9)",
+        type=float,
+        default=9,
+    )
+    parser.add_argument(
+        "--numproc",
+        help="number of concurrent processes to use; set to 0 to not process (default=1)",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--log-stdout",
+        "--log_stdout",
+        action="store_true",
+        help="log to stdout instead of redirecting to a file",
+    )
+    args = parser.parse_args()
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+    return args
+
+
+def main():
+
+    for kwargs in args._get_kwargs():
+        log.info("{}\t{}".format(kwargs[0], kwargs[1]))
+
+    # read
+    ext = "SPECINFO"
+    h = fits.open(args.mergefn)
+
+    # redrock
+    if "redrock" in args.extras.split(","):
+
+        d = Table(h[ext].data)
+        key_prefix = "RR"
+
+        # get redrock infos
+        rr = get_rr(
+            d["TARGETID"], d["COADDFN"], args.rrsubdir, args.dchi2_0_min, args.numproc
+        )
+        for key in get_rrkeys():
+            d["{}_{}".format(key_prefix, key)] = rr[key]
+
+        # swap the extension
+        myh = fits.convenience.table_to_hdu(d)
+        for key in h[ext].header:
+            if key not in myh.header:
+                myh.header[key] = h[ext].header[key]
+        myh.header["RRSUBDIR"] = args.rrsubdir
+        myh.header["DCHI2MIN"] = args.dchi2_0_min
+
+        i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
+        h[i] = myh
+
+    # zelda
+    if "zelda" in args.extras.split(","):
+
+        d = Table(h[ext].data)
+
+        zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
+            "RR_Z0_ZELDA",
+            "RR_Z1_ZELDA",
+            "VI_Z_ZELDA",
+        ]
+
+        # get zelda infos
+        _, zelda_grids_dir, zelda_dnn_dir = get_default_zelda_dirs()
+        zelda_model, zelda_geometry = "outflow", "tsc"
+        # test with gauss_smooth=None and gauss_smooth=1
+        #   shows that gauss_smooth=None has a nicer rchi2 distribution,
+        #   tighter around 1
+        gauss_smooth = None
+
+        for zkey, key_prefix in zip(zkeys, key_prefixes):
+
+            outpdf = args.mergefn.replace(".fits", "-zelda-{}.pdf".format(zkey.lower()))
+            nplot = 1000  # pick random nplot spectra
+            log.info(outpdf)
+
+            if zkey in ["RR_Z0", "RR_Z1"]:
+                zs = d["RR_ALL_Z"][:, int(zkey[-1])]
+            else:
+                zs = d[zkey]
+
+            log.info("running zelda with zkey={}; outpdf={}".format(zkey, outpdf))
+            zd = get_zelda_fit(
+                zelda_grids_dir,
+                zelda_dnn_dir,
+                zelda_model,
+                zelda_geometry,
+                d["TARGETID"],
+                zs,
+                h["BRZ_WAVE"].data,
+                h["BRZ_FLUX"].data,
+                h["BRZ_IVAR"].data,
+                gauss_smooth,
+                outpdf,
+                nplot,
+                args.numproc,
+            )
+            for key in zd.colnames:
+                if key == "FIT":
+                    d[key_prefix] = zd[key]
+                else:
+                    d["{}_{}".format(key_prefix, key)] = zd[key]
+
+        # swap the extension
+        myh = fits.convenience.table_to_hdu(d)
+        for key in h[ext].header:
+            if key not in myh.header:
+                myh.header[key] = h[ext].header[key]
+        myh.header["ZD_GRIDS"] = zelda_grids_dir
+        myh.header["ZD_DNN"] = zelda_dnn_dir
+        myh.header["ZD_MODEL"] = zelda_model
+        myh.header["ZD_GEOM"] = zelda_geometry
+        myh.header["ZD_SMOOT"] = gauss_smooth
+        myh.header["DCHI2MIN"] = args.dchi2_0_min
+
+        i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
+        h[i] = myh
+
+    # write
+    h.writeto(args.mergefn, overwrite=True)
+
+
+if __name__ == "__main__":
+
+    args = parse()
+
+    assert args.mergefn.split(os.path.extsep)[-1] == "fits"
+
+    outlog = args.mergefn.replace(".fits", "-extra.log")
+
+    if args.log_stdout:
+
+        main()
+
+    else:
+
+        with stdouterr_redirected(to=outlog):
+
+            main()
