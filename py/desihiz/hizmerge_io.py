@@ -461,7 +461,11 @@ def get_vi_fns(img):
     if img == "clauds":
 
         mydir = os.path.join(get_img_dir("clauds"), "vi")
-        fns = [os.path.join(mydir, "desi-vi-truth-table_fuji_V4.ecsv")]
+        mydir2 = os.path.join(get_img_dir("suprime"), "vi")
+        fns = [
+            os.path.join(mydir, "desi-vi-truth-table_fuji_V4.ecsv"),
+            os.path.join(mydir2, "all_VI_COSMOS_LBG_CLAUDS.fits.gz")
+        ]
 
     return fns
 
@@ -526,15 +530,18 @@ def read_vi_fn(fn):
     # - remove duplicates
     # - rename columns
     if basename in basenames["clauds"]:
-        sel = d["DUPL"] != "d"
-        log.info("{}\t: remove {} duplicates".format(basename, (~sel).sum()))
-        d = d[sel]
-        for key_old, key_new in zip(
-            ["VI_quality", "VI_z", "VI_spectype", "VI_comment"],
-            ["VI_QUALITY", "VI_Z", "VI_SPECTYPE", "VI_COMMENTS"],
-        ):
-            d[key_old].name = key_new
-            log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
+
+        if basename == "desi-vi-truth-table_fuji_V4.ecsv":
+
+            sel = d["DUPL"] != "d"
+            log.info("{}\t: remove {} duplicates".format(basename, (~sel).sum()))
+            d = d[sel]
+            for key_old, key_new in zip(
+                ["VI_quality", "VI_z", "VI_spectype", "VI_comment"],
+                ["VI_QUALITY", "VI_Z", "VI_SPECTYPE", "VI_COMMENTS"],
+            ):
+                d[key_old].name = key_new
+                log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
 
     # we want no duplicates at this point
     assert np.unique(d["TARGETID"]).size == len(d)
