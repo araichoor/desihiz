@@ -1,0 +1,20 @@
+# to run redrock:
+
+# first grab 2 gpu nodes:
+salloc --nodes 2 --qos interactive --time 4:00:00 --constraint gpu --gpus-per-node=4 --account desi_g
+
+# then set the environment variables
+export RR_TEMPLATE_DIR=/global/cfs/cdirs/desi/users/raichoor/laelbg/templates/rr2023oct
+export OMP_NUM_THREADS=1
+
+# set the working folder, for instance:
+MYDIR=/global/cfs/cdirs/desi/users/raichoor/laelbg/loa/healpix/tileid80871-80872-thru20210512-loa
+
+# set the redrock folder, and list the coadd files
+MYRRDIR=$MYDIR/rr2023oct
+ls $MYDIR/coadd*fits > $MYRRDIR/list_coadds.ascii
+
+# run redrock
+date; time srun -N 2 -n 8 -c 2 --gpu-bind=map_gpu:3,2,1,0  wrap_rrdesi -i $MYRRDIR/list_coadds.ascii -o $MYRRDIR --gpu --rrdetails > $MYRRDIR/redrock.log 2>&1
+
+
