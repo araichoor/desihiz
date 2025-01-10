@@ -29,12 +29,13 @@ from desiutil.log import get_logger
 log = get_logger()
 
 # allowed values
-allowed_imgs = ["odin", "suprime", "clauds", "hscwide"]
+allowed_imgs = ["odin", "suprime", "clauds", "hscwide", "ibis"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2", "cosmos_yr3"],
     "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3"],
     "hscwide": ["cosmos_yr3"],
+    "ibis": ["xmmlss_yr4"]
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -115,6 +116,12 @@ def get_img_bands(img):
 
         bands = ["GRIZ"]
 
+    if img == "ibis":
+
+        bands = ["M411", "M438", "M464", "M490", "M517"]
+        # AR add a "fake" band M541, corresponding to the DJS synthetic redder filter for LyA at z=3.45
+        bands.append("M541")
+
     return bands
 
 
@@ -157,6 +164,7 @@ def get_bb_img(fn):
         "Subaru_tractor_forced_all.fits.gz",
         "Subaru_tractor_forced_all-redux-20231025.fits",
         "cosmos-spring2024-hscwide-data.fits",
+        "ibis-xmm-ar-djs-he.fits",
     ]:
 
         bb_img = "HSC"
@@ -169,6 +177,12 @@ def get_bb_img(fn):
     ]:
 
         bb_img = "CLAUDS"
+
+    elif os.path.basename(fn) in [
+        "ibis3-xmm-forced-hsc-wide.fits",
+    ]:
+
+        bb_img = "HSC"
 
     else:
 
@@ -207,7 +221,14 @@ def get_specprod(case):
     """
     assert case in allowed_cases
 
-    specprod = "loa"
+    # TODO: update
+    if case in ["xmmlss_yr4"]:
+
+        specprod = "daily"
+
+    else:
+
+        specprod = "loa"
 
     return specprod
 
@@ -281,6 +302,13 @@ def get_specdirs(img, case):
 
             casedirs = ["tertiary37-thru20240309-loa"]
 
+    if img == "ibis":
+
+        if case == "xmmlss_yr4":
+
+            # TODO: update
+            casedirs = ["tertiary44-thru20241230"]
+
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
     ]
@@ -291,6 +319,7 @@ def get_specdirs(img, case):
 # ODIN: https://github.com/moustakas/fastspecfit-projects/blob/main/tertiary/deep-photometry.ipynb
 # LS:   https://www.legacysurvey.org/dr9/catalogs/#galactic-extinction-coefficients
 # HSC:  https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_wide.forced
+# IBIS: https://desisurvey.slack.com/archives/C027M1AF31C/p1734727460173929
 def get_ext_coeffs(img):
     """
     Get the per-filter Alam extinction coefficients to correct for Galactic dust.
@@ -311,17 +340,21 @@ def get_ext_coeffs(img):
             filter curves from http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse:
             see email from Eddie from 03/24/2023
             hsc: https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_dud_rev.forced
+        IBIS:
+            slack message from Arjun (see above)
     """
     assert img in allowed_imgs
 
     tmpdict = {
         "ODIN": {"N419": 4.324, "N501": 3.540, "N673": 2.438},
         "HSC": {
+            "SYNTHG": 3.240,
             "G": 3.240,
             "R": 2.276,
             "R2": 2.276,
             "I": 1.633,
             "I2": 1.633,
+            "Y": 1.076,
             "Z": 1.263,
         },
         "LS": {"G": 3.214, "R": 2.165, "I": 1.592, "Z": 1.211},
@@ -341,6 +374,13 @@ def get_ext_coeffs(img):
             "Z": 1.263,
             "Y": 1.075,
         },
+        "IBIS": {
+            "M411": 4.290,
+            "M438": 4.099,
+            "M464": 3.877,
+            "M490": 3.634,
+            "M517": 3.389,
+        }
     }
 
     if img == "odin":
@@ -358,6 +398,10 @@ def get_ext_coeffs(img):
     if img == "hscwide":
 
         mydict = {_: tmpdict[_] for _ in ["HSC"]}
+
+    if img == "ibis":
+
+        mydict = {_: tmpdict[_] for _ in ["IBIS", "HSC"]}
 
     return mydict
 
@@ -809,6 +853,15 @@ def get_img_infos(img, case, stdsky):
             if case == "cosmos_yr3":
                 mydict = get_hscwide_cosmos_yr3_infos()
 
+        if img == "ibis":
+
+            from desihiz.hizmerge_ibis import (
+                get_ibis_xmmlss_yr4_infos,
+            )
+
+            if case == "xmmlss_yr4":
+                mydict = get_ibis_xmmlss_yr4_infos()
+
     bands = get_img_bands(img)
     for band in bands:
         log.info(
@@ -1016,6 +1069,63 @@ def read_targfn(targfn):
                     basename, band, band, band, band
                 )
             )
+
+    # IBIS
+    if basename in [
+        "ibis3-xmm-forced-hsc-wide.fits",
+    ]:
+
+        if basename == "ibis3-xmm-forced-hsc-wide.fits":
+
+            from desihiz.hizmerge_ibis import (
+                swap_maskbits,
+                add_synthg
+            )
+
+            # remove a handful of duplicates...
+            p["UNQID"] = ["{}-{}".format(b, o) for b, o in zip(p["BRICKNAME"], p["OBJID"])]
+            _, ii = np.unique(p["UNQID"], return_index=True)
+            log.info("remove {} duplicates from {} rows".format(len(p) - ii.size, len(p)))
+            p = p[ii]
+
+            # swap maskbits
+            p = swap_maskbits(p)
+
+            # add ad synthetic g-flux
+            p = add_synthg(p)
+
+            # remove a-posteriori-added columns
+            old_roots = ["FORCED_FLUX", "FORCED_PSFDEPTH", "FORCED_GALDEPTH"]
+            new_roots = ["FLUX", "PSFDEPTH", "GALDEPTH"]
+
+            black_keys = []
+            for band in get_img_bands("ibis") + ["G", "R", "I", "Z", "Y"]:
+                # AR fake added band for selections
+                if band == "M541":
+                    continue
+                for prefix in ["DEPTH", "SNR", "MAG", "FIBMAG"]:
+                    key = "{}_{}".format(prefix, band)
+                    if key in p.colnames:
+                        black_keys.append(key)
+                        #log.info("remove (a posteriori added) column: {}".format(key))
+            black_keys += ["CLAUDS", "CLAUDS_ID", "CLAUDS_ZPHOT"]
+            log.info("remove (a posteriori added) columns: {}".format(",".join(black_keys)))
+            p.remove_columns(black_keys)
+
+            for key in p.colnames:
+
+                for old_root, new_root in zip(old_roots, new_roots):
+
+                    if old_root in key:
+
+                        p[key].name = key.replace(old_root, new_root)
+                        log.info(
+                            "{}:\trename {} to {}".format(
+                                basename,
+                                key,
+                                key.replace(old_root, new_root),
+                            )
+                        )
 
     log.info("{} colnames: {}".format(basename, ", ".join(p.colnames)))
 
@@ -1562,6 +1672,15 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
             ],
         }
 
+    # ibis
+    if img == "ibis":
+
+        mydict = {}
+        for tmpband in get_img_bands("ibis"):
+            mydict["xmmlss_yr4_{}".format(tmpband)] = [
+                os.path.join(photdir, "ibis3-xmm-forced-hsc-wide.fits")
+            ]
+
     if "{}_{}".format(case, band) in mydict:
 
         return mydict["{}_{}".format(case, band)]
@@ -1608,7 +1727,7 @@ def get_phot_init_table(img, n):
         ("BB_IMG", "S6"),  # HSC or LS or CLAUDS
     ]
 
-    if img in ["odin", "suprime"]:
+    if img in ["odin", "suprime", "ibis"]:
 
         # tractor columns
         # https://github.com/legacysurvey/legacypipe/blob/cbde86f7f78692091fca7b48d423450074aa0472/bin/generate-sweep-files.py#L360-L574
@@ -1629,6 +1748,12 @@ def get_phot_init_table(img, n):
         # img fluxs + depths
         for band in bands:
 
+            if img == "ibis":
+                if band == "M541":
+                    continue
+                else:
+                    dtype += [("NEA_{}".format(band), ">f4")]
+
             dtype += [
                 ("FLUX_{}".format(band), ">f4"),
                 ("FLUX_IVAR_{}".format(band), ">f4"),
@@ -1637,8 +1762,22 @@ def get_phot_init_table(img, n):
                 ("GALDEPTH_{}".format(band), ">f4"),
             ]
 
+        # ibis synthg
+        if img == "ibis":
+            band = "SYNTHG"
+            dtype += [
+                ("FLUX_{}".format(band), ">f4"),
+                ("FLUX_IVAR_{}".format(band), ">f4"),
+                ("FIBERFLUX_{}".format(band), ">f4"),
+            ]
+
+
         # ls-{dr9.1.1,dr10} or hsc fluxes
-        for band in ["G", "R", "R2", "I", "I2", "Z"]:
+        if img == "ibis":
+            bb_bands = ["G", "R", "I", "Z", "Y"]
+        else:
+            bb_bands = ["G", "R", "R2", "I", "I2", "Z"]
+        for band in bb_bands:
 
             dtype += [
                 ("FLUX_{}".format(band), ">f4"),
@@ -1785,6 +1924,16 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             photdir,
         )
 
+    if img == "ibis":
+
+        from desihiz.hizmerge_ibis import get_ibis_phot_infos
+
+        d["BRICKNAME"], d["OBJID"], d["FILENAME"] = get_ibis_phot_infos(
+            case, specinfo_table, photdir=photdir
+        )
+        log.info("ibis, targfns = {}".format(", ".join(np.unique(d["FILENAME"]))))
+
+
     # propagating columns from specinfo_table
     keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]
 
@@ -1795,7 +1944,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     # unique identifier (from a tractor catalog point of view)
     #   note that for odin:
     #       cosmos_yr1, N673 actually have 373 duplicated d_unqids...
-    if img in ["odin", "suprime"]:
+    #   note that for ibis:
+    #       xmmlss_yr4, some duplicated d_unqids
+    if img in ["odin", "suprime", "ibis"]:
         d_unqids = np.array(
             ["{}-{}".format(b, o) for b, o in zip(d["BRICKNAME"], d["OBJID"])]
         )
@@ -1825,7 +1976,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             + bands
             + ["CASE"]
         )
-        if img in ["odin", "suprime"]:
+        if img in ["odin", "suprime", "ibis"]:
             ignore_keys += ["BRICKNAME", "OBJID"]
         if img in ["clauds"]:
             ignore_keys += ["ID"]
@@ -1852,7 +2003,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         # read input photometry (with some column names manipulation)
         p = read_targfn(os.path.join(photdir, os.path.basename(targfn)))
 
-        if img in ["odin", "suprime"]:
+        if img in ["odin", "suprime", "ibis"]:
             p_unqids = np.array(
                 ["{}-{}".format(b, o) for b, o in zip(p["BRICKNAME"], p["OBJID"])]
             )
@@ -1880,7 +2031,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         ii = [np.where(p_unqids == dcut_unqid)[0][0] for dcut_unqid in dcut_unqids]
         p, p_unqids = p[ii], p_unqids[ii]
         assert np.all(p_unqids == dcut_unqids)
-        if img in ["odin", "suprime"]:
+        if img in ["odin", "suprime", "ibis"]:
             assert np.all(p["BRICKNAME"] == dcut["BRICKNAME"])
             assert np.all(p["OBJID"] == dcut["OBJID"])
         if img in ["clauds"]:
@@ -1888,7 +2039,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         if img in ["hscwide"]:
             assert np.all(p["OBJECT_ID"] == dcut["OBJECT_ID"])
 
-        if img in ["odin", "suprime"]:
+        if img in ["odin", "suprime", "ibis"]:
             # easy columns..
             for key in [
                 "RELEASE",
@@ -1904,15 +2055,36 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                 dcut[key] = p[key]
 
-            for band in bands:
+            if img == "ibis":
 
-                for key in [
-                    "FLUX_{}".format(band),
-                    "FLUX_IVAR_{}".format(band),
-                    "FIBERFLUX_{}".format(band),
-                    "PSFDEPTH_{}".format(band),
-                    "GALDEPTH_{}".format(band),
-                ]:
+                tmpbands = [_ for _ in bands if _ != "M541"] + ["SYNTHG"]
+                prefixes = ["NEA", "FLUX", "FLUX_IVAR", "FIBERFLUX", "PSFDEPTH", "GALDEPTH"]
+                bb_bands = ["G", "R", "I", "Z", "Y"]
+
+            else:
+
+                tmpbands = bands
+
+                bb_bands = ["G", "R", "R2", "I", "I2", "Z"]
+
+            for band in tmpbands:
+
+                if img == "ibis":
+
+                    if band in bands:
+                        prefixes = ["NEA", "FLUX", "FLUX_IVAR", "FIBERFLUX", "PSFDEPTH", "GALDEPTH"]
+                    elif band == "SYNTHG":
+                        prefixes = ["FLUX", "FLUX_IVAR", "FIBERFLUX"]
+                    else:
+                        prefixes = ["FLUX", "FLUX_IVAR", "FIBERFLUX", "PSFDEPTH", "GALDEPTH"]
+
+                else:
+
+                    prefixes = ["FLUX", "FLUX_IVAR", "FIBERFLUX", "PSFDEPTH", "GALDEPTH"]
+
+                for prefix in prefixes:
+
+                    key = "{}_{}".format(prefix, band)
 
                     if key in p.colnames:
 
@@ -1928,7 +2100,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             dcut["BB_IMG"] = get_bb_img(targfn)
 
             # now bb photometry
-            for band in ["G", "R", "R2", "I", "I2", "Z"]:
+            for band in bb_bands:
 
                 for key in [
                     "FLUX_{}".format(band),
@@ -1968,7 +2140,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
     search_radius = 1.0
 
-    if img in ["odin", "suprime"]:
+    if img in ["odin", "suprime", "ibis"]:
 
         sel = np.zeros(len(d), dtype=bool)
 
