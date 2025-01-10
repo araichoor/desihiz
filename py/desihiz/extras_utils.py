@@ -11,7 +11,7 @@ import numpy as np
 from astropy.table import Table, vstack
 from matplotlib import pyplot as plt
 
-from desitarget.geomask import match_to
+from desitarget.geomask import match_to, match
 from redrock.results import read_zscan
 from desiutil.log import get_logger
 
@@ -24,7 +24,7 @@ log = get_logger()
 wave_lya = 1215.67
 wave_oii = 0.5 * (3726.1 + 3728.8)
 
-allowed_extras = ["redrock", "zelda"]
+allowed_extras = ["redrock", "zelda", "cnn"]
 
 allowed_zelda_models = ["outflow"]
 allowed_zelda_geometries = ["tsc"]
@@ -558,5 +558,39 @@ def get_zelda_fit(
         for outpng in outpngs:
             if outpng is not None:
                 os.remove(outpng)
+
+    return d
+
+
+
+def get_cnnkeys():
+
+    keys = [
+        "Z",
+        "CL",
+    ]
+
+    return keys
+
+def get_cnn(tids, cnnfn):
+
+    d = Table()
+    d["CL"] = -99. + np.zeros(len(tids))
+    d["Z"] = -99.
+
+    # read the cnn file
+    c = Table(fitsio.read(cnnfn))
+    ii, iic = match(tids, c["TARGETID"])
+    log.info("{}/{} TARGETIDs are in {}".format(ii.size, len(d), cnnfn))
+    d["CL"][ii] = c["CL_cnn"][iic]
+
+    # now read the redrock files
+    pattern = os.path.join(os.path.dirname(cnnfn), "redrock-*.fits")
+    fns = sorted(glob(pattern))
+    log.info("found {} {} files".format(len(fns), pattern))
+    rr = vstack([Table(fitsio.read(fn, "REDSHIFTS")) for fn in fns])
+    ii, iirr = match(tids, rr["TARGETID"])
+    log.info("{}/{} TARGETIDs are in the {} {} files".format(ii.size, len(d), len(fns), pattern))
+    d["Z"][ii] = rr["Z"][iirr]
 
     return d
