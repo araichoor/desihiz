@@ -105,7 +105,7 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     d["Z_01_BEST"] = d["Z"].copy()
     sel = d["DELTACHI2"] < dchi2_0_min
     sel &= (
-        np.abs(1 + d["ALL_Z"][:, 0] * wave_oii / wave_lya - 1 - d["ALL_Z"][:, 1]) < 0.01
+        np.abs((1 + d["ALL_Z"][:, 0]) * wave_oii / wave_lya - 1 - d["ALL_Z"][:, 1]) < 0.01
     )
     d["Z_01_BEST"][sel] = d["ALL_Z"][:, 1][sel]
 
