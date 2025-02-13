@@ -2,10 +2,45 @@
 Change Log
 ==========
 
-2.4.1 (unreleased)
+3.0.1 (unreleased)
 ------------------
 
 * No changes yet
+
+3.0.0 (2025-02-13)
+------------------
+
+* Tagged version used to generate v20250213 catalogs.
+
+* Ibis xmm (tertiary44) and preliminary cnn (PR `#37`_).
+* add vi file for clauds (PR `#36`_).
+* Add extras (PR `#35`_).
+* get_smooth(): add output ivar (PR `#34`_).
+* Various fixes (PR `#33`_).
+* Tertiary37 hsc (PR `#32`_).
+* Tertiary37 clauds (PR `#31`_).
+* switch to loa production for all cases (PR `#30`_).
+* Clauds tile82636 (PR `#29`_).
+* Tertiary37 (PR `#28`_).
+* rescale_template2mag(): bugfix (PR `#27`_).
+* Simcoadd read spectra (PR `#26`_).
+* Simcoadd: allow continuous (z, mag) values (PR `#24`_).
+* Simcoadd (PR `#23`_).
+
+.. _`#37`: https://github.com/araichoor/desihiz/pull/37
+.. _`#36`: https://github.com/araichoor/desihiz/pull/36
+.. _`#35`: https://github.com/araichoor/desihiz/pull/35
+.. _`#34`: https://github.com/araichoor/desihiz/pull/34
+.. _`#33`: https://github.com/araichoor/desihiz/pull/33
+.. _`#32`: https://github.com/araichoor/desihiz/pull/32
+.. _`#31`: https://github.com/araichoor/desihiz/pull/31
+.. _`#30`: https://github.com/araichoor/desihiz/pull/30
+.. _`#29`: https://github.com/araichoor/desihiz/pull/29
+.. _`#28`: https://github.com/araichoor/desihiz/pull/28
+.. _`#27`: https://github.com/araichoor/desihiz/pull/27
+.. _`#26`: https://github.com/araichoor/desihiz/pull/26
+.. _`#24`: https://github.com/araichoor/desihiz/pull/24
+.. _`#23`: https://github.com/araichoor/desihiz/pull/23
 
 2.4.0 (2024-07-15)
 ------------------
