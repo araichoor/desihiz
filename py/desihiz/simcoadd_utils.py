@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import fitsio
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table, vstack
@@ -13,6 +14,7 @@ from redrock.utils import native_endian
 from desiutil.log import get_logger
 from desispec.io import read_frame, read_sky, read_flux_calibration
 from desispec.io.util import get_tempfilename
+from desihiz.specphot_utils import get_smooth
 
 #
 import matplotlib.pyplot as plt
@@ -789,3 +791,100 @@ def create_rrtemplate_with_z(template_fn, outdir, zmin, zmax):
     outfn = os.path.join(outdir, os.path.basename(template_fn))
     log.info("write to {}".format(outfn))
     h.writeto(outfn, overwrite=True)
+
+
+def get_lya_profile(
+    mergefn,
+    efftime_min_hr=2.0, efftime_max_hr=6.0,
+    zmin=2.0, zmax=5.0,
+    rrdchi2_min=9.,
+    lyaf_min=5.0, lyaf_max=20.0,
+):
+    """
+    Generate a representative Lya line profile in the rest-frame.
+
+    Args:
+        mergefn: merged file like desi-ibis.fits (str)
+        efftime_min_hr (optional, defaults to 2): min. EFFTIME_SPEC [min] for the spectra selection (float)
+        efftime_max_hr (optional, defaults to 5): max. EFFTIME_SPEC [min] for the spectra selection (float)
+        zmin (optional, defaults to 2): min. RR_Z value for the spectra selection (float)
+        zmax (optional, defaults to 5): max. RR_Z value for the spectra selection (float)
+        rrdchi2_min (optional, defaults to 9): RR_DELTACHI2 threshold value to select secure RR_Z (float)
+        lyaf_min (optional, defaults to 5): min. RR_Z0_ZELDA_LYAFLUX value for the spectra selection (float)
+        lyaf_max (optional, defaults to 20): max. RR_Z0_ZELDA_LYAFLUX value for the spectra selection (float)
+
+    Returns:
+        rf_ws: rest-frame wavelengths (in 1200A - 1235A) (np.array() of floats)
+        st_fs: Lya flux (arbitrary units, normalized to an area of 1) (np.array() of floats)
+        settings: dictionary with the settings
+
+    Notes:
+        We cut on RR_Z0_ZELDA_LYAFLUX to select representative Lya profiles.
+    """
+
+    # AR record settings, for output
+    settings = {
+        "mergefn" : mergefn,
+        "efftime_min_hr": efftime_min_hr,
+        "efftime_max_hr": efftime_max_hr,
+        "zmin": zmin, "zmax": zmax,
+        "rrdchi2_min": rrdchi2_min,
+        "lyaf_min": lyaf_min, "lyaf_max": lyaf_max,
+    }
+
+    # AR read file
+    d = Table.read(mergefn, "SPECINFO")
+    ws = fitsio.read(mergefn, "BRZ_WAVE")
+    fs = fitsio.read(mergefn, "BRZ_FLUX")
+    ivs = fitsio.read(mergefn, "BRZ_IVAR")
+
+    # AR cut on spectra
+    sel = d["COADD_FIBERSTATUS"] == 0
+    sel &= d["EFFTIME_SPEC"] / 3600. > efftime_min_hr
+    sel &= d["EFFTIME_SPEC"] / 3600. < efftime_max_hr
+    sel &= (d["RR_Z"] > zmin) & (d["RR_Z"] < zmax)
+    sel &= d["RR_Z0_ZELDA_LYAFLUX"] > lyaf_min
+    sel &= d["RR_Z0_ZELDA_LYAFLUX"] < lyaf_max
+    d, fs, ivs = d[sel], fs[sel, :], ivs[sel, :]
+    nspec = len(d)
+
+    # AR define the rest-frame wavelengths
+    # AR reasonable range around the lya line
+    # AR this grid has a rf 0.07A sampling
+    # AR at z=5, this corresponds to obs. 0.42A sampling
+    # AR    which is still smaller than the desi 0.8A, so ok
+    rf_ws = np.linspace(1200, 1235, 500)
+    nw = len(rf_ws)
+
+    # AR loop on spectra:
+    # AR - move to rest-frame
+    # AR - normalize area to 1
+    # AR - remove continuum
+    rf_fs = np.zeros((nspec, nw))
+    rf_ivs = np.zeros((nspec, nw))
+    for i in range(nspec):
+        z = d["RR_Z0_ZELDA_Z"][i]
+        rf_fs[i] = np.interp(rf_ws, ws / (1 + z), fs[i], left=0, right=0)
+        rf_ivs[i] = np.interp(rf_ws, ws / (1 + z), ivs[i], left=0, right=0)
+        # normalize to area=1
+        area = (rf_fs[i] * rf_ivs[i]).sum() / rf_fs[i].sum()
+        rf_fs[i] /= area
+        rf_ivs[i] *= area ** 2
+        # remove continuum
+        sel = (rf_ws < 1210) | (rf_ws > 1220)
+        sel &= rf_ivs[i] > 0
+        rf_fs[i] -= np.median(rf_fs[i][sel])
+
+    # AR ivar-weighted mean
+    st_fs = (rf_fs * rf_ivs).sum(axis=0)
+    st_ivs = rf_ivs.sum(axis=0)
+    sel = st_ivs > 0
+    st_fs[sel] /= st_ivs[sel]
+    # smooth the aisles
+    sm_fs, _ = get_smooth(st_fs, st_ivs, 5)
+    sel = (rf_ws < 1212) | (rf_ws > 1220)
+    st_fs[sel] = sm_fs[sel]
+    # normalize the area to 1
+    st_fs /= np.trapz(st_fs, x=rf_ws)
+
+    return rf_ws, st_fs, settings
