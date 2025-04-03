@@ -12,7 +12,9 @@ from astropy.convolution import convolve, Box1DKernel
 from speclite.filters import load_filter
 from redrock.utils import native_endian
 from desiutil.log import get_logger
-from desispec.io import read_frame, read_sky, read_flux_calibration
+from desispec.io import read_frame, read_sky, read_flux_calibration, read_spectra
+from desispec.coaddition import coadd_cameras, coadd
+from desispec.maskbits import fibermask
 from desispec.io.util import get_tempfilename
 from desihiz.specphot_utils import get_smooth
 
@@ -888,3 +890,144 @@ def get_lya_profile(
     st_fs /= np.trapz(st_fs, x=rf_ws)
 
     return rf_ws, st_fs, settings
+
+
+# AR from Julien s dashboard
+def get_new_collim_dates():
+    return {
+        0: 20230927,
+        1: 20220613,
+        3: 20230926,
+        4: 20000000, # collimator is ok
+        5: 20240916,
+        6: 20240917,
+        7: 20220615,
+        8: 20230928,
+        9: 99999999, # will be replaced
+    }
+
+
+# AR d: EXP_FIBERMAP
+# AR when: "before" or "after"
+# AR if when=before, flag+reject tids having any obs. after
+# AR if when=after, flag+reject tids having any obs. before
+def get_tids_collim(d, when):
+    assert when in ["before", "after"]
+    new_collim_dates = get_new_collim_dates()
+    sel = np.zeros(len(d), dtype=bool)
+    for petal, date in new_collim_dates.items():
+        if when == "before":
+            sel |= (d["PETAL_LOC"] == petal) & (d["NIGHT"] > date)
+        else:
+            sel |= (d["PETAL_LOC"] == petal) & (d["NIGHT"] < date)
+    black_tids = np.unique(d["TARGETID"][sel])
+    tids = np.unique(d["TARGETID"])
+    tids = tids[~np.in1d(tids, black_tids)]
+    return tids
+
+
+def coadd_skies(s, effmin, effmax, wrepeat):
+    done_tids = []
+    while len(done_tids) < np.unique(s.fibermap["TARGETID"]).size:
+        #
+        ii = np.where(~np.in1d(s.fibermap["TARGETID"], done_tids))[0]
+        i0 = ii[0]
+        tid = s.fibermap["TARGETID"][i0]
+        efftime = 12.15 * s.scores["TSNR2_LRG"][i0]
+        if efftime > effmax:
+            done_tids.append(tid)
+            continue
+        sel_ii = [i0]
+        sel_fibers = (s.exp_fibermap["FIBER"][s.exp_fibermap["TARGETID"] == tid]).tolist()
+        for i in ii[1:]:
+            tid_i = s.fibermap["TARGETID"][i]
+            efftime_i = 12.15 * s.scores["TSNR2_LRG"][i]
+            # TODO: this approach tends to add until effmax..
+            if (efftime + efftime_i  > effmin) & (efftime + efftime_i < effmax):
+                fibers = s.exp_fibermap["FIBER"][s.exp_fibermap["TARGETID"] == tid_i]
+                if not wrepeat:
+                    if np.in1d(fibers, sel_fibers).sum() > 0:
+                        print("skip because norepeats")
+                        continue
+                sel_ii.append(i)
+                sel_fibers += fibers.tolist()
+                efftime += efftime_i
+        s.fibermap["TARGETID"][sel_ii] = tid
+        done_tids.append(tid)
+    print(np.unique(s.fibermap["TARGETID"]).size)
+    coadd(s)
+    return s
+
+def read_skies(sky_coadd_fn, effmin, effmax, noise_method, coadd, when_collim, wrepeat, rescale_noise_cams=None, rescale_noise_elecs=None):
+
+    assert noise_method in ["flux", "ivar"]
+    assert when_collim in [None, "before", "after"]
+
+    s = read_spectra(sky_coadd_fn)
+
+    # AR cut on collimator dates?
+    # AR (should be done before coadd=True, as that mess up
+    # AR    with tids)
+    if when_collim in ["before", "after"]:
+        tids = get_tids_collim(s.exp_fibermap, when_collim)
+        s = s.select(targets = tids)
+
+    if coadd:
+        s = coadd_skies(s, effmin, effmax, wrepeat)
+
+    # AR sky: rescale?
+    # AR TODO : if noise_method!=flux, the rescaling may not be relevant
+    rescale_var = {}
+    for camera in cameras:
+        rescale_var[camera.lower()] = np.ones_like(s.wave[camera.lower()])
+    if rescale_noise_cams is not None:
+        for camera, goal_rd_elec in zip(
+            rescale_noise_cams.split(","),
+            rescale_noise_elecs.split(","),
+        ):
+            (
+                rescale_ws,
+                rescale_var[camera.lower()],
+            ) = get_rescale_var_vector(camera.lower(), float(goal_rd_elec))
+            assert np.all(rescale_ws == s.wave[camera.lower()])
+    for camera in cameras:
+        s.flux[camera.lower()] *= rescale_var[camera.lower()] ** 0.5
+        s.ivar[camera.lower()] /= rescale_var[camera.lower()]
+
+    # AR coadd over cameras
+    s = coadd_cameras(s)
+    ws, fs, ivs = s.wave["brz"], s.flux["brz"], s.ivar["brz"]
+
+    d = Table(s.fibermap)
+    d2 = Table(s.scores)
+    for k in d2.colnames:
+        if k in d.colnames:
+            assert np.all(d[k] == d2[k])
+        else:
+            d[k] = d2[k]
+    d["EFFTIME_SPEC"] = 12.15 * d["TSNR2_LRG"]
+
+    # AR valid fibers
+    sel = np.ones(len(d), dtype=bool)
+    for name in ["BADPOSITION", "BADAMPB", "BADAMPR", "BADAMPZ"]:
+        sel &= (d["COADD_FIBERSTATUS"] & fibermask[name]) == 0
+    d, fs, ivs = d[sel], fs[sel], ivs[sel]
+    """
+    skyfibers = get_sky_fibers(d)
+    current_ivar = get_fiberbitmasked_frame_arrays(frame,bitmask='sky',ivar_framemask=True,return_mask=False)
+    bad=(np.sum(current_ivar[skyfibers]>0,axis=1)==0)
+    skyfibers = skyfibers[~bad]
+    d, fs, ivs = d[skyfibers], fs[skyfibers], ivs[skyfibers]
+    """
+
+    sel = (d["EFFTIME_SPEC"] > effmin) & (d["EFFTIME_SPEC"] < effmax)
+    d, fs, ivs = d[sel], fs[sel], ivs[sel]
+
+    # AR pick a value from IVAR
+    # AR set to 0 where IVAR=0..
+    if noise_method == "ivar":
+        fs = np.random.normal(size=fs.shape) * ivs ** -0.5
+        fs[ivs == 0] = 0
+
+    return d, ws, fs, ivs
+

@@ -1,0 +1,426 @@
+#!/usr/bin/env python
+
+import os
+from time import time
+import numpy as np
+import fitsio
+from astropy.io import fits
+from astropy.table import Table
+from desispec.io import read_spectra
+from desispec.coaddition import coadd_cameras, coadd
+from desispec.maskbits import fibermask
+from desispec.sky import get_sky_fibers
+from desispec.fiberbitmasking import get_fiberbitmasked_frame_arrays
+from desiutil.log import get_logger
+from desihiz.simcoadd_utils import fluxunits, get_lya_profile, read_skies
+from desihiz.laelf_utils import get_filt_lminmax
+from matplotlib import pyplot as plt
+from matplotlib import gridspec
+from argparse import ArgumentParser
+
+
+# AR settings
+my_sky_coadd_fn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "loa",
+    "healpix",
+    "skies-loa.fits",
+)
+my_mergefn = os.path.join(
+    os.getenv("DESI_ROOT"),
+    "users",
+    "raichoor",
+    "laelbg",
+    "ibis",
+    "v20250213",
+    "desi-ibis.fits",
+)
+np_rand_seed = 1234
+np.random.seed(np_rand_seed)
+
+log = get_logger()
+
+
+def parse():
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--outfn",
+        help="output file (default=None)",
+        type=str,
+        default=None,
+        required=True,
+    )
+    parser.add_argument(
+        "--sky_coadd_fn",
+        help="coadd compiling sky fibers, used to pick the sky ivar from (default={})".format(
+            my_sky_coadd_fn
+        ),
+        type=str,
+        default=my_sky_coadd_fn,
+    )
+    parser.add_argument(
+        "--mergefn",
+        help="mergefn with same formatting e.g. as desi-ibis.fits (default={})".format(
+            my_mergefn
+        ),
+        type=str,
+        default=my_mergefn,
+    )
+    parser.add_argument(
+        "--noise_method",
+        help="flux: pick FLUX values; ivar: draw a value from IVAR (default=flux)",
+        type=str,
+        choices=["flux", "ivar"],
+        default="flux",
+    )
+    parser.add_argument(
+        "--when_collim",
+        help="only select data before/after a new collimator has been installed (default=None)",
+        type=str,
+        choices=["before", "after"],
+        default=None,
+    )
+    parser.add_argument(
+        "--steps",
+        help="csv steps to be done (default=fits,plot)",
+        type=str,
+        default="fits,plot",
+    )
+    parser.add_argument(
+        "--efftime_min_min",
+        help="min. EFFTIME_SPEC in minutes (default=15)",
+        type=int,
+        default=15,
+    )
+    parser.add_argument(
+        "--efftime_min_max",
+        help="max. EFFTIME_SPEC in minutes (default=315)",
+        type=int,
+        default=315,
+    )
+    parser.add_argument(
+        "--efftime_min_bin",
+        help="EFFTIME_SPEC binning in minutes (default=15)",
+        type=int,
+        default=30,
+    )
+    parser.add_argument("--z_min", help="z_min (default=2.1)", type=float, default=2.1)
+    parser.add_argument("--z_max", help="z_max (default=5.0)", type=float, default=5.0)
+    parser.add_argument(
+        "--z_bin", help="z_bin (default=0.02)", type=float, default=0.02
+    )
+    parser.add_argument(
+        "--coadd",
+        help="coadd sky fibers for each EFFTIME_SPEC bin?",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--wrepeat",
+        help="when coadding sky fibers, allow indiv. spectra coming from the same fiber",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--rescale_noise_cams",
+        help="comma-separated list of the cameras to rescale the rd noise (default=None)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--rescale_noise_elecs",
+        help="comma-separated list of the rd noise electrons to rescale to (default=None)",
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="overwrite output file?"
+    )
+    args = parser.parse_args()
+    for kwargs in args._get_kwargs():
+        log.info(kwargs)
+    return args
+
+
+def main():
+
+    # AR
+    args = parse()
+
+    if "fits" in args.steps.split(","):
+
+        # AR z, efftime grids
+        grid_zs = (
+            np.arange(args.z_min, args.z_max + args.z_bin, args.z_bin).round(4).tolist()
+        )
+        grid_efftimes = (
+            60.0
+            * np.arange(
+                args.efftime_min_min,
+                args.efftime_min_max + args.efftime_min_bin,
+                args.efftime_min_bin,
+            )
+        ).tolist()
+        log.info("grid_zs: {}".format(grid_zs))
+        log.info("grid_efftimes: {}".format(grid_efftimes))
+        # AR first: efftime, then: z
+        effmins, effmaxs = [], []
+        zmins, zmaxs = [], []
+        for i in range(len(grid_efftimes) - 1):
+            effmins += [grid_efftimes[i] for _ in grid_zs[1:]]
+            effmaxs += [grid_efftimes[i + 1] for _ in grid_zs[1:]]
+            zmins += grid_zs[:-1]
+            zmaxs += grid_zs[1:]
+
+        # AR rest-frame lya profile
+        rf_ws, rf_lya_fs, lya_settings = get_lya_profile(args.mergefn)
+
+        # AR get lya_flim for the (z, efftime) grid
+        outd = Table()
+        outd["ZMIN"], outd["ZMAX"] = zmins, zmaxs
+        outd["EFFTIME_SPEC_MIN"], outd["EFFTIME_SPEC_MAX"] = effmins, effmaxs
+        outd["NSPEC"] = 0
+        outd["LYA_FLUX_MEDIAN"], outd["LYA_FLUX_MEAN"], outd["LYA_FLUX_STD"] = (
+            np.nan,
+            np.nan,
+            np.nan,
+        )
+        (
+            outd["LYA_FIBERFLUX_MEDIAN"],
+            outd["LYA_FIBERFLUX_MEAN"],
+            outd["LYA_FIBERFLUX_STD"],
+        ) = (np.nan, np.nan, np.nan)
+
+        log.info("# ZMIN ZMAX EFFTIME_MIN EFFTIME_MAX NSPEC")
+        prev_effmin, prev_effmax = None, None
+        for i in range(len(outd)):
+
+            effmin = outd["EFFTIME_SPEC_MIN"][i]
+            effmax = outd["EFFTIME_SPEC_MAX"][i]
+
+            # AR spectra selection
+            if effmin != prev_effmin:
+                d, ws, fs, ivs = read_skies(
+                    args.sky_coadd_fn,
+                    effmin,
+                    effmax,
+                    args.noise_method,
+                    args.coadd,
+                    args.when_collim,
+                    args.wrepeat,
+                    rescale_noise_cams=args.rescale_noise_cams,
+                    rescale_noise_elecs=args.rescale_noise_elecs,
+                )
+                assert np.unique(np.diff(ws).round(2)).size == 1
+                dw = np.diff(ws).round(2)[0]  # 0.8A
+
+            nspec = len(d)
+            log.info(
+                "{:.2f}\t{:.2f}\t{:.0f}\t{:.0f}\t{}".format(
+                    outd["ZMIN"][i],
+                    outd["ZMAX"][i],
+                    outd["EFFTIME_SPEC_MIN"][i],
+                    outd["EFFTIME_SPEC_MAX"][i],
+                    nspec,
+                )
+            )
+            if nspec == 0:
+                continue
+            psfcorrs = d["MEAN_PSF_TO_FIBER_SPECFLUX"].copy()
+
+            # AR assign random uniform redshifts in zmin, zmax to the spectra
+            zs = np.random.uniform(
+                low=outd["ZMIN"][i], high=outd["ZMAX"][i], size=nspec
+            )
+
+            # AR wavelengths selection
+            lyafs_z, lyaffs_z = np.zeros(nspec), np.zeros(nspec)
+
+            for j in range(nspec):
+
+                # AR move to obs. frame
+                lya_fs = np.interp(
+                    ws, rf_ws * (1 + zs[j]), rf_lya_fs, left=np.nan, right=np.nan
+                )
+
+                # AR corresponding pixels
+                wsel = np.isfinite(lya_fs)
+
+                # AR normalize p to 1 (so 1e-17/erg/s/cm)
+                # (the normalization factor should be (1+z)...)
+                lya_fs /= np.trapz(lya_fs[wsel], x=ws[wsel])
+
+                # AR integrate sky * lya_fs
+                lyafs_z[j] = (fs[j, wsel] * lya_fs[wsel] * ivs[j, wsel]).sum()
+                lyafs_z[j] *= dw
+                lyafs_z[j] /= (ivs[j, wsel] * lya_fs[wsel] ** 2).sum()
+                lyaffs_z[j] = psfcorrs[j] * lyafs_z[j]
+
+            # AR stats for the nspec sky spectra
+            outd["NSPEC"][i] = nspec
+            outd["LYA_FLUX_MEDIAN"][i] = np.nanmedian(lyafs_z)
+            outd["LYA_FLUX_MEAN"][i] = np.nanmean(lyafs_z)
+            outd["LYA_FLUX_STD"][i] = np.nanstd(lyafs_z)
+            outd["LYA_FIBERFLUX_MEDIAN"][i] = np.nanmedian(lyaffs_z)
+            outd["LYA_FIBERFLUX_MEAN"][i] = np.nanmean(lyaffs_z)
+            outd["LYA_FIBERFLUX_STD"][i] = np.nanstd(lyaffs_z)
+
+            prev_effmin = effmin
+            prev_effmax = effmax
+
+        # AR write
+        hs = fits.HDUList()
+
+        h = fits.PrimaryHDU()
+        hs.append(h)
+
+        h = fits.convenience.table_to_hdu(outd)
+        h.header["EXTNAME"] = "LYAFLIM"
+        # h.header["BUNIT"] = fluxunits
+        h.header["SKYCOFN"] = args.sky_coadd_fn
+        h.header["NOISMETH"] = args.noise_method
+        h.header["COADD"] = args.coadd
+        h.header["WHENCOLM"] = args.when_collim
+        hs.append(h)
+
+        d = Table()
+        d["WAVE"], d["FLUX"] = rf_ws, rf_lya_fs
+        h = fits.convenience.table_to_hdu(d)
+        h.header["EXTNAME"] = "LYAPROF"
+        h.header["MERGEFN"] = args.mergefn
+        h.header["EFFMINHR"] = lya_settings["efftime_min_hr"]
+        h.header["EFFMAXHR"] = lya_settings["efftime_max_hr"]
+        h.header["ZMIN"] = lya_settings["zmin"]
+        h.header["ZMAX"] = lya_settings["zmax"]
+        h.header["DCHI2MIN"] = lya_settings["rrdchi2_min"]
+        h.header["LYAFMIN"] = lya_settings["lyaf_min"]
+        h.header["LYAFMAX"] = lya_settings["lyaf_max"]
+        hs.append(h)
+
+        hs.writeto(args.outfn, overwrite=args.overwrite)
+
+    # AR plot
+    if "plot" in args.steps.split(","):
+
+        w_lya = 1215.7
+        fkey = "LYA_FIBERFLUX_STD"
+        nsigma = 7
+
+        # AR ibis filters
+        lminmax = get_filt_lminmax("desi2")
+        lminmax.pop("MB0")
+        lminmax.pop("N540")
+        bands = {
+            "MB1": "M411",
+            "MB2": "M438",
+            "MB3": "M464",
+            "MB4": "M490",
+            "MB5": "M517",
+        }
+
+        # AR read
+        d = Table.read(args.outfn, "LYAFLIM")
+        sel = d["EFFTIME_SPEC_MAX"] <= 270 * 60
+        d = d[sel]
+        d["Z"] = 0.5 * (d["ZMIN"] + d["ZMAX"])
+        _ = Table.read(args.outfn, "LYAPROF")
+        rf_ws, rf_lya_fs = _["WAVE"], _["FLUX"]
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        # AR lya-flim = f(z, efftime)
+        effmins = np.unique(d["EFFTIME_SPEC_MIN"])
+        effmaxs = np.unique(d["EFFTIME_SPEC_MAX"])
+        cols = plt.rcParams["axes.prop_cycle"].by_key()["color"][: effmins.size]
+        i_ref = 1
+        sel_ref = (d["EFFTIME_SPEC_MIN"] >= effmins[i_ref]) & (
+            d["EFFTIME_SPEC_MAX"] <= effmaxs[i_ref]
+        )
+        eff_ref = 0.5 * (effmins[i_ref] + effmaxs[i_ref])
+        for effmin, effmax, col in zip(effmins, effmaxs, cols):
+            sel = (d["EFFTIME_SPEC_MIN"] >= effmin) & (d["EFFTIME_SPEC_MAX"] <= effmax)
+            ax.plot(
+                d["Z"][sel],
+                nsigma * d[fkey][sel],
+                color=col,
+                # label="{:.0f}min - {:.0f}min ({} sky spectra)".format(effmin / 60., effmax / 60., d["NSPEC"][sel][0]),
+                label="{:.0f}min ({} sky spectra)".format(
+                    0.5 * (effmin + effmax) / 60.0, d["NSPEC"][sel][0]
+                ),
+            )
+            factor = np.sqrt(0.5 * (effmin + effmax) / eff_ref)
+            ax.plot(
+                d["Z"][sel_ref],
+                nsigma * d[fkey][sel_ref] / factor,
+                color=col,
+                ls="--",
+                lw=0.5,
+            )
+        title = "{} sky TARGETIDs".format(
+            fitsio.read_header(args.sky_coadd_fn, 1)["NAXIS2"]
+        )
+        if args.coadd:
+            title += "; coadding sky fibers from different TARGETIDs for each bin"
+        ax.set_title(title)
+        ax.set_xlabel("Redshift")
+        ax.set_ylabel(
+            "{}-sigma {} limit [1e-17 erg/s/cm2]".format(
+                nsigma, fkey.replace("_STD", "")
+            )
+        )
+        ax.set_yscale("log")
+        ax.set_xlim(2.1, 3.6)
+        ax.set_ylim(1, 20)
+        yticks = np.arange(1, 11).tolist() + [20]
+        ax.set_yticks(yticks)
+        ax.set_yticklabels([str(_) for _ in yticks])
+        ax.grid()
+        ax.legend(loc=1, ncol=2)
+        # txt = "Dashed lines: scaling the {:.0f}min - {:.0f}min curve".format(effmins[i_ref] / 60., effmaxs[i_ref] / 60.)
+        txt = "Dashed lines: scaling the {:.0f}min curve".format(
+            (effmins[i_ref] + effmaxs[i_ref]) / 60.0
+        )
+        ax.text(0.025, 0.025, txt, transform=ax.transAxes)
+        ax.text(
+            0.025,
+            0.95,
+            "Sky flux: picked from {}".format(args.noise_method),
+            transform=ax.transAxes,
+        )
+        if args.rescale_noise_cams is not None:
+            txts = [
+                "{}={}".format(camera, rd)
+                for camera, rd in zip(
+                    args.rescale_noise_cams.split(","),
+                    args.rescale_noise_elecs.split(","),
+                )
+            ]
+            ax.text(
+                0.025,
+                0.90,
+                "Read-noise [e-/pix]: {}".format(", ".join(txts)),
+                transform=ax.transAxes,
+            )
+        if args.when_collim in ["before", "after"]:
+            ax.text(
+                0.025,
+                0.90,
+                "Only data {} collimators change".format(args.when_collim),
+                transform=ax.transAxes,
+            )
+
+        # AR ibis bands
+        y, dy = 1.5, 0.95
+        for key in lminmax:
+            lmin, lmax = lminmax[key]["lmin"], lminmax[key]["lmax"]
+            zmin, zmax = lmin / w_lya - 1, lmax / w_lya - 1
+            ax.plot([zmin, zmax], [y, y], color="k", lw=4, alpha=0.25)
+            ax.text(0.5 * (zmin + zmax), y / dy, bands[key], ha="center", va="bottom")
+            y *= dy
+        plt.savefig(args.outfn.replace(".fits", ".png"), bbox_inches="tight")
+        plt.close()
+
+
+if __name__ == "__main__":
+    main()
