@@ -518,7 +518,10 @@ def get_zelda_fit(
 
         tmpdir = tempfile.mkdtemp()
         np.random.seed(1234)
-        ii = np.random.choice(len(tids), size=nplot, replace=False)
+        if len(tids) < nplot:
+            ii = np.arange(len(tids))
+        else:
+            ii = np.random.choice(len(tids), size=nplot, replace=False)
         outpngs[ii] = [os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in ii]
         titles[ii] = ["TARGETID = {}".format(tid) for tid in tids[ii]]
 

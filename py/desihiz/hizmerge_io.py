@@ -24,18 +24,20 @@ from desispec.fiberbitmasking import (
     get_justamps_fiberbitmask,
 )
 from desispec.tsnr import get_ensemble
+from desiutil.dust import ebv as dust_ebv
 from desiutil.log import get_logger
 
 log = get_logger()
 
 # allowed values
-allowed_imgs = ["odin", "suprime", "clauds", "hscwide", "ibis"]
+allowed_imgs = ["odin", "suprime", "clauds", "hscwide", "ibis", "merian"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2", "cosmos_yr3"],
     "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3"],
     "hscwide": ["cosmos_yr3"],
-    "ibis": ["xmmlss_yr4"]
+    "ibis": ["xmmlss_yr4"],
+    "merian": ["cosmos_yr2"],
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -122,6 +124,10 @@ def get_img_bands(img):
         # AR add a "fake" band M541, corresponding to the DJS synthetic redder filter for LyA at z=3.45
         bands.append("M541")
 
+    if img == "merian":
+
+        bands = ["N540"]
+
     return bands
 
 
@@ -180,6 +186,12 @@ def get_bb_img(fn):
 
     elif os.path.basename(fn) in [
         "ibis3-xmm-forced-hsc-wide.fits",
+    ]:
+
+        bb_img = "HSC"
+
+    elif os.path.basename(fn) in [
+        "Merian_COSMOS_LAE_N540.fits"
     ]:
 
         bb_img = "HSC"
@@ -309,6 +321,12 @@ def get_specdirs(img, case):
             # TODO: update
             casedirs = ["tertiary44-thru20241230"]
 
+    if img == "merian":
+
+        if case == "cosmos_yr2":
+
+            casedirs = ["tertiary23-thru20230326-loa"]
+
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
     ]
@@ -320,6 +338,7 @@ def get_specdirs(img, case):
 # LS:   https://www.legacysurvey.org/dr9/catalogs/#galactic-extinction-coefficients
 # HSC:  https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_wide.forced
 # IBIS: https://desisurvey.slack.com/archives/C027M1AF31C/p1734727460173929
+# MERIAN: eye-balling Schlafly+11 Table 6
 def get_ext_coeffs(img):
     """
     Get the per-filter Alam extinction coefficients to correct for Galactic dust.
@@ -342,6 +361,8 @@ def get_ext_coeffs(img):
             hsc: https://hsc-release.mtk.nao.ac.jp/schema/#pdr3.pdr3_dud_rev.forced
         IBIS:
             slack message from Arjun (see above)
+        MERIAN:
+            eye-balling R_V_3.1=f(lambda_eff) from Schlafly+11 Table 6.
     """
     assert img in allowed_imgs
 
@@ -380,6 +401,9 @@ def get_ext_coeffs(img):
             "M464": 3.877,
             "M490": 3.634,
             "M517": 3.389,
+        },
+        "MERIAN": {
+            "N540": 2.76,
         }
     }
 
@@ -402,6 +426,10 @@ def get_ext_coeffs(img):
     if img == "ibis":
 
         mydict = {_: tmpdict[_] for _ in ["IBIS", "HSC"]}
+
+    if img == "merian":
+
+        mydict = {_: tmpdict[_] for _ in ["MERIAN", "HSC"]}
 
     return mydict
 
@@ -511,6 +539,13 @@ def get_vi_fns(img):
             os.path.join(mydir2, "all_VI_COSMOS_LBG_CLAUDS.fits.gz")
         ]
 
+    if img == "merian":
+
+        mydir = os.path.join(get_img_dir("merian"), "vi")
+        fns = [
+            os.path.join(mydir, "DESI_ancillary_MS3_VI_results.fits")
+        ]
+
     return fns
 
 
@@ -529,6 +564,8 @@ def read_vi_fn(fn):
 
     if basename.split(os.path.extsep)[-1] == "ecsv":
         d = Table.read(fn)
+    elif basename == "DESI_ancillary_MS3_VI_results.fits":
+        d = Table(fits.open(fn)[1].data)
     else:
         d = Table(fitsio.read(fn))
     log.info("{}\t: read {} rows".format(basename, len(d)))
@@ -586,6 +623,19 @@ def read_vi_fn(fn):
             ):
                 d[key_old].name = key_new
                 log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
+
+    # merian
+    if basename in basenames["merian"]:
+
+        if basename == "DESI_ancillary_MS3_VI_results.fits":
+            for key_old, key_new in zip(
+                ["VI_quality", "VI_z", "VI_spectype", "VI_comment"],
+                ["VI_QUALITY", "VI_Z", "VI_SPECTYPE", "VI_COMMENTS"],
+            ):
+                d[key_old].name = key_new
+                log.info("{}\t: rename {} to {}".format(basename, key_old, key_new))
+            # AR two comments are buggy, we erase them...
+            d["VI_COMMENTS"][[33, 537]] = ""
 
     # we want no duplicates at this point
     assert np.unique(d["TARGETID"]).size == len(d)
@@ -862,6 +912,16 @@ def get_img_infos(img, case, stdsky):
             if case == "xmmlss_yr4":
                 mydict = get_ibis_xmmlss_yr4_infos()
 
+
+        if img == "merian":
+
+            from desihiz.hizmerge_merian import (
+                get_merian_cosmos_yr2_infos,
+            )
+
+            if case == "cosmos_yr2":
+                mydict = get_merian_cosmos_yr2_infos()
+
     bands = get_img_bands(img)
     for band in bands:
         log.info(
@@ -889,7 +949,8 @@ def read_targfn(targfn):
     basename = os.path.basename(targfn)
 
     # CLAUDS official catalogs cannot be read with Table(fitsio.read())..
-    if "11bands-SExtractor-Lephare" in basename:
+    # MERIAN photometric catalog either
+    if ("11bands-SExtractor-Lephare" in basename) | (basename == "Merian_COSMOS_LAE_N540.fits"):
         p = Table(fits.open(targfn)[1].data)
     else:
         p = Table(fitsio.read(targfn))
@@ -1126,6 +1187,72 @@ def read_targfn(targfn):
                                 key.replace(old_root, new_root),
                             )
                         )
+
+
+    # AR MERIAN
+    if basename in [
+        "Merian_COSMOS_LAE_N540.fits",
+    ]:
+
+        if basename == "Merian_COSMOS_LAE_N540.fits":
+
+            # AR SExtractor fluxes are:
+            # AR    mag_ab = 27.0 - 2.5 * log10(flux_se)
+            # AR we convert to nanomaggies with:
+            # AR    flux = flux_se * 10 ** (-(27.0-22.5)/2.5)
+            # AR same for fluxerr
+            coeff = 10 ** (- (27.0 - 22.5) / 2.5)
+            for key in p.colnames:
+                if "FLUX" in key: # AR handles FLUX and FLUXERR columns
+                    p[key] *= coeff
+
+            keep_keys = ["INDEX_LAE", "RA", "DEC"]
+            # AR take values for n540
+            generic_keys = ["X_IMAGE", "Y_IMAGE", "ALPHA_J2000", "DELTA_J2000", "CLASS_STAR", "FLUX_RADIUS", "FLAGS"]
+            keep_keys += [key for key in generic_keys if key not in ["ALPHA_J2000", "DELTA_J2000"]]
+            for key in generic_keys:
+                p[key] = p["{}_N540".format(key)]
+            p["ALPHA_J2000"].name, p["DELTA_J2000"].name = "RA", "DEC"
+
+            # AR N540 FLUX, FLUX_IVAR
+            p["FLUX_N540"] = p["FLUX_AUTO_N540"].copy()
+            p["FLUX_IVAR_N540"] = 1. / p["FLUXERR_AUTO_N540"] ** 2
+            keep_keys += ["FLUX_N540", "FLUX_IVAR_N540"]
+
+            # AR take: mag_band = mag_n540 + (mag_aper_band - mag_aper_n540)
+            # AR ie    flux_band = flux_n540 * flux_aper_band / flux_aper_n540
+            # AR flux_err ** 2  =
+            # AR        (flux_aper_band / flux_aper_n540 * flux_err_n540) ** 2 +
+            # AR        (flux_n540 / flux_aper_n540 * flux_err_aper_band) ** 2 +
+            # AR        (flux_n540 * flux_aper_band / flux_aper_n540 ** 2 * flux_err_aper_n540) ** 2
+            # AR                =
+            # AR        (flux_band / flux_n540 * flux_err_n540) ** 2 +
+            # AR        (flux_band / flux_aper_band * flux_err_aper_band) ** 2 +
+            # AR        (flux_band / flux_aper_n540 * flux_err_aper_n540) ** 2
+            # AR                =
+            # AR        flux_band ** 2 * (
+            # AR            (flux_err_n540 / flux_n540) ** 2 +
+            # AR            (flux_err_aper_band / flux_aper_band) ** 2 +
+            # AR            (flux_err_aper_n540 / flux_aper_n540) ** 2
+            # AR            )
+            # AR
+            for band in ["G", "R", "I", "Z", "Y"]:
+                p["FLUX_{}".format(band)] = p["FLUX_N540"] * p["FLUX_APER_{}".format(band)] / p["FLUX_APER_N540"]
+                p["FLUX_IVAR_{}".format(band)] = (
+                    1. / p["FLUX_{}".format(band)] ** 2 / (
+                        (p["FLUXERR_AUTO_N540"] / p["FLUX_N540"]) ** 2 +
+                        (p["FLUXERR_APER_{}".format(band)] / p["FLUX_APER_{}".format(band)]) ** 2 +
+                        (p["FLUXERR_APER_N540"] / p["FLUX_APER_N540"]) ** 2
+                    )
+                )
+                keep_keys += ["FLUX_{}".format(band), "FLUX_IVAR_{}".format(band)]
+
+            # AR add EBV
+            p["EBV"] = dust_ebv(p["RA"], p["DEC"])
+            keep_keys += ["EBV"]
+
+            log.info("keep columns: {}".format(",".join(keep_keys)))
+            p.keep_columns(keep_keys)
 
     log.info("{} colnames: {}".format(basename, ", ".join(p.colnames)))
 
@@ -1681,6 +1808,13 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
                 os.path.join(photdir, "ibis3-xmm-forced-hsc-wide.fits")
             ]
 
+    # merian
+    if img == "merian":
+
+        mydict = {
+            "cosmos_yr2_N540": [os.path.join(photdir, "Merian_COSMOS_LAE_N540.fits")]
+        }
+
     if "{}_{}".format(case, band) in mydict:
 
         return mydict["{}_{}".format(case, band)]
@@ -1849,6 +1983,32 @@ def get_phot_init_table(img, n):
                 ("FLUX_IVAR_{}".format(band), ">f4"),
             ]
 
+    if img in ["merian"]:
+
+            dtype += [
+                ("INDEX_LAE", "<U11"),
+                ("X_IMAGE", ">f8"),
+                ("Y_IMAGE", ">f8"),
+                ("RA", ">f8"),
+                ("DEC", ">f8"),
+                ("EBV", ">f4"),
+                ("CLASS_STAR", ">f4"),
+                ("FLUX_RADIUS", ">f4"),
+                ("FLAGS", ">i2"),
+                ("FLUX_N540", ">f8"),
+                ("FLUX_IVAR_N540", ">f8"),
+                ("FLUX_G", ">f8"),
+                ("FLUX_IVAR_G", ">f8"),
+                ("FLUX_R", ">f8"),
+                ("FLUX_IVAR_R", ">f8"),
+                ("FLUX_I", ">f8"),
+                ("FLUX_IVAR_I", ">f8"),
+                ("FLUX_Z", ">f8"),
+                ("FLUX_IVAR_Z", ">f8"),
+                ("FLUX_Y", ">f8"),
+                ("FLUX_IVAR_Y", ">f8"),
+            ]
+
     t = Table(np.zeros(n, dtype=dtype))
 
     return t
@@ -1933,6 +2093,21 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         )
         log.info("ibis, targfns = {}".format(", ".join(np.unique(d["FILENAME"]))))
 
+    if img == "clauds":
+
+        from desihiz.hizmerge_merian import get_merian_phot_infos
+
+        d["ID"], d["FILENAME"] = get_clauds_phot_infos(
+            case, specinfo_table, photdir, v2=v2
+        )
+
+    if img == "merian":
+
+        from desihiz.hizmerge_merian import get_merian_phot_infos
+
+        d["INDEX_LAE"], d["FILENAME"] = get_merian_phot_infos(
+            case, specinfo_table, photdir
+        )
 
     # propagating columns from specinfo_table
     keys = ["TARGETID", "STD", "SKY"] + bands + ["CASE"]
@@ -1955,6 +2130,9 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
     if img in ["hscwide"]:
         d_unqids = d["OBJECT_ID"].copy()
+
+    if img in ["merian"]:
+        d_unqids = d["INDEX_LAE"].copy()
 
     targfns = np.unique(d["FILENAME"])
     log.info("targfns = {}".format(", ".join(targfns)))
@@ -1982,6 +2160,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             ignore_keys += ["ID"]
         if img in ["hscwide"]:
             ignore_keys += ["OBJECT_ID"]
+        if img in ["merian"]:
+            ignore_keys += ["INDEX_LAE"]
 
         for key in d.colnames:
 
@@ -2011,6 +2191,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             p_unqids = p["ID"].copy()
         if img in ["hscwide"]:
             p_unqids = p["OBJECT_ID"].copy()
+        if img in ["merian"]:
+            p_unqids = p["INDEX_LAE"].copy()
 
         _, ii = np.unique(p_unqids, return_index=True)
 
@@ -2038,6 +2220,8 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
             assert np.all(p["ID"] == dcut["ID"])
         if img in ["hscwide"]:
             assert np.all(p["OBJECT_ID"] == dcut["OBJECT_ID"])
+        if img in ["merian"]:
+            assert np.all(p["INDEX_LAE"] == dcut["INDEX_LAE"])
 
         if img in ["odin", "suprime", "ibis"]:
             # easy columns..
@@ -2135,6 +2319,13 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                 dcut[key] = p[key]
 
+        if img in ["merian"]:
+            dcut["BB_IMG"] = get_bb_img(targfn)
+
+            for key in p.colnames:
+
+                dcut[key] = p[key]
+
         # update d
         d[iid] = dcut
 
@@ -2153,6 +2344,10 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         sel = np.ones(len(d), dtype=bool)
 
     if img in ["hscwide"]:
+
+        sel = np.ones(len(d), dtype=bool)
+
+    if img in ["merian"]:
 
         sel = np.ones(len(d), dtype=bool)
 
