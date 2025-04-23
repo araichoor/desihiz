@@ -1910,6 +1910,64 @@ def add_cosmos2020_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey
     return d
 
 
+def add_clauds_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey="DEC"):
+    """
+    Add CLAUDS zphot infos.
+
+    Args:
+        d: input table (astropy.table.Table())
+        case: round of DESI observation (str)
+        ii (optional, default to None): list of indices to work with (list of ints)
+        search_radius (optional, defaults to 1.0): radius for matching, in arcsec (float)
+        rakey (optional, defaults to RA): R.A. key column name (str)
+        deckey (optional, defaults to DEC): Dec. key column name (str)
+    Returns:
+        d: same as input table, with three extra columns:
+            CLAUDS (bool), CLAUDS_ID, CLAUDS_ZPHOT
+
+    Notes:
+        Use the CLAUDS 11bands-SExtractor-Lephare zphots.
+        If the three CLAUDS, CLAUDS_ID, CLAUDS_ZPHOT columns
+            already exist in d, they will be overwritten.
+        If "case" is not in a CLAUDS field, the three columns will still be added,
+            but with default values.
+        As the "official" and offset catalogs are row-matched, there is no need to
+            distinguish for the zphots.
+    """
+    # AR
+    if ii is None:
+        ii = np.arange(len(d), dtype=int)
+
+    fn = get_clauds_fn(case)
+    log.info("clauds_fn = {}".format(fn))
+    keys = ["CLAUDS", "CLAUDS_ID", "CLAUDS_ZPHOT"]
+    keys = [key for key in keys if key in d.colnames]
+    if len(keys) > 0:
+        log.warning("existing {} columns will be overwritten".format(",".join(keys)))
+    d["CLAUDS"] = np.zeros(len(d), dtype=bool)
+    d["CLAUDS_ID"] = np.zeros(len(d), dtype=">i8")
+    d["CLAUDS_ZPHOT"] = np.zeros(len(d))
+
+    if fn is not None:
+
+        z = Table.read(fn)  # cannot be read with fitsio...
+        iid, iiz, _, _, _ = match_coord(
+            d[rakey][ii],
+            d[deckey][ii],
+            z["RA"],
+            z["DEC"],
+            search_radius=search_radius,
+        )
+        d["CLAUDS"] = np.zeros(len(d), dtype=bool)
+        d["CLAUDS_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
+        d["CLAUDS_ZPHOT"] = np.zeros(len(d))
+        d["CLAUDS"][ii[iid]] = True
+        d["CLAUDS_ID"][ii[iid]] = z["ID"][iiz]
+        d["CLAUDS_ZPHOT"][ii[iid]] = z["ZPHOT"][iiz]
+
+    return d
+
+
 def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     """
     Get the photometric information for a given {img, case}
@@ -2218,30 +2276,7 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
     d = add_cosmos2020_zphot(d, case, ii=iibands)
 
     # add zphot clauds
-    # remark: as the "official" and offset catalogs are row-matched
-    #           there is no need to distinguish for the zphots
-    fn = get_clauds_fn(case)
-    log.info("clauds_fn = {}".format(fn))
-    d["CLAUDS"] = np.zeros(len(d), dtype=bool)
-    d["CLAUDS_ID"] = np.zeros(len(d), dtype=">i8")
-    d["CLAUDS_ZPHOT"] = np.zeros(len(d))
-
-    if fn is not None:
-
-        z = Table.read(fn)  # cannot be read with fitsio...
-        iid, iiz, _, _, _ = match_coord(
-            d["RA"][iibands],
-            d["DEC"][iibands],
-            z["RA"],
-            z["DEC"],
-            search_radius=search_radius,
-        )
-        d["CLAUDS"] = np.zeros(len(d), dtype=bool)
-        d["CLAUDS_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
-        d["CLAUDS_ZPHOT"] = np.zeros(len(d))
-        d["CLAUDS"][iibands[iid]] = True
-        d["CLAUDS_ID"][iibands[iid]] = z["ID"][iiz]
-        d["CLAUDS_ZPHOT"][iibands[iid]] = z["ZPHOT"][iiz]
+    d = add_clauds_zphot(d, case, ii=iibands)
 
     # clauds cosmos_yr1: at least DESILBG_TMG_FINAL and DESILBG_BXU_FINAL
     #   have objects in common, but those have different TARGETIDs
