@@ -1888,7 +1888,7 @@ def add_cosmos2020_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey
         log.warning("existing {} columns will be overwritten".format(",".join(keys)))
     d["COSMOS2020"] = np.zeros(len(d), dtype=bool)
     d["COSMOS2020_ID"] = np.zeros(len(d), dtype=">i8")
-    d["COSMOS2020_ZPHOT"] = np.zeros(len(d))
+    d["COSMOS2020_ZPHOT"] = np.nan + np.zeros(len(d))
 
     if fn is not None:
 
@@ -1903,7 +1903,7 @@ def add_cosmos2020_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey
         )
         d["COSMOS2020"] = np.zeros(len(d), dtype=bool)
         d["COSMOS2020_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
-        d["COSMOS2020_ZPHOT"] = np.zeros(len(d))
+        d["COSMOS2020_ZPHOT"] = np.nan + np.zeros(len(d))
         d["COSMOS2020"][ii[iid]] = True
         d["COSMOS2020_ID"][ii[iid]] = z["ID"][iiz]
         d["COSMOS2020_ZPHOT"][ii[iid]] = z["lp_zBEST"][iiz]
@@ -1947,7 +1947,7 @@ def add_clauds_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey="DE
         log.warning("existing {} columns will be overwritten".format(",".join(keys)))
     d["CLAUDS"] = np.zeros(len(d), dtype=bool)
     d["CLAUDS_ID"] = np.zeros(len(d), dtype=">i8")
-    d["CLAUDS_ZPHOT"] = np.zeros(len(d))
+    d["CLAUDS_ZPHOT"] = np.nan + np.zeros(len(d))
 
     if fn is not None:
 
@@ -1962,7 +1962,7 @@ def add_clauds_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey="DE
         )
         d["CLAUDS"] = np.zeros(len(d), dtype=bool)
         d["CLAUDS_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
-        d["CLAUDS_ZPHOT"] = np.zeros(len(d))
+        d["CLAUDS_ZPHOT"] = np.nan + np.zeros(len(d))
         d["CLAUDS"][ii[iid]] = True
         d["CLAUDS_ID"][ii[iid]] = z["ID"][iiz]
         d["CLAUDS_ZPHOT"][ii[iid]] = z["ZPHOT"][iiz]
