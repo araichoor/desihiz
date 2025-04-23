@@ -1893,6 +1893,7 @@ def add_cosmos2020_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey
     if fn is not None:
 
         z = fitsio.read(fn, columns=["ID", "ALPHA_J2000", "DELTA_J2000", "lp_zBEST"])
+        z = z[z["lp_zBEST"] >= 0]
         iid, iiz, _, _, _ = match_coord(
             d[rakey][ii],
             d[deckey][ii],
@@ -1951,6 +1952,7 @@ def add_clauds_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey="DE
     if fn is not None:
 
         z = Table.read(fn)  # cannot be read with fitsio...
+        z = z[z["ZPHOT"] != -99]
         iid, iiz, _, _, _ = match_coord(
             d[rakey][ii],
             d[deckey][ii],
