@@ -1901,9 +1901,8 @@ def add_cosmos2020_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey
             z["DELTA_J2000"],
             search_radius=search_radius,
         )
-        d["COSMOS2020"] = np.zeros(len(d), dtype=bool)
+        # AR re-initialize COSMOS2020_ID to have the correct dtype
         d["COSMOS2020_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
-        d["COSMOS2020_ZPHOT"] = np.nan + np.zeros(len(d))
         d["COSMOS2020"][ii[iid]] = True
         d["COSMOS2020_ID"][ii[iid]] = z["ID"][iiz]
         d["COSMOS2020_ZPHOT"][ii[iid]] = z["lp_zBEST"][iiz]
@@ -1960,9 +1959,8 @@ def add_clauds_zphot(d, case, ii=None, search_radius=1.0, rakey="RA", deckey="DE
             z["DEC"],
             search_radius=search_radius,
         )
-        d["CLAUDS"] = np.zeros(len(d), dtype=bool)
+        # AR re-initialize CLAUDS_ID to have the correct dtype
         d["CLAUDS_ID"] = np.zeros_like(z["ID"], shape=(len(d),))
-        d["CLAUDS_ZPHOT"] = np.nan + np.zeros(len(d))
         d["CLAUDS"][ii[iid]] = True
         d["CLAUDS_ID"][ii[iid]] = z["ID"][iiz]
         d["CLAUDS_ZPHOT"][ii[iid]] = z["ZPHOT"][iiz]
