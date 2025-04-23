@@ -2252,8 +2252,6 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
         # update d
         d[iid] = dcut
 
-    search_radius = 1.0
-
     if img in ["odin", "suprime", "ibis"]:
 
         sel = np.zeros(len(d), dtype=bool)
