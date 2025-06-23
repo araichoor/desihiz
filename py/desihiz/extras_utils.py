@@ -9,11 +9,13 @@ import multiprocessing
 import fitsio
 import numpy as np
 from astropy.table import Table, vstack
+from scipy.optimize import curve_fit
 from matplotlib import pyplot as plt
 
 from desitarget.geomask import match_to, match
 from redrock.results import read_zscan
 from desiutil.log import get_logger
+from speclite import filters as speclite_filters
 
 from desihiz.specphot_utils import get_smooth
 
@@ -110,6 +112,202 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     d["Z_01_BEST"][sel] = d["ALL_Z"][:, 1][sel]
 
     return d
+
+
+def cont_powerlaw(ws, coeff, beta):
+    """
+    Returns a power law spectrum, used to model LAE/LBG continuum.
+
+    Args:
+        ws: the wavelength array (in A preferentially) (np.array of floats)
+        coeff: the multiplicative coefficient (float)
+        beta: the slope (float)
+
+    Returns:
+        coeff * ws ** beta (np.array of floats)
+    """
+
+    return coeff * ws ** beta
+
+
+def get_speclite_filtname(bb_img, band):
+    """
+    Get the speclite name for a band.
+
+    Args:
+        bb_img: the broad-band imaging ("", "CLAUDS", "HSC", or "LS") (str)
+        band: the filter name (str)
+
+    Returns:
+        "hsc2017-{band.lower} or "decamDR1-{band.lower}".
+
+    Notes:
+        if bb_img = "", then the function returns None.
+    """
+
+    assert bb_img in ["", "CLAUDS", "HSC", "LS"]
+
+    if bb_img == "":
+        return None
+    if bb_img in ["CLAUDS", "HSC"]:
+        return "hsc2017-{}".format(band.lower())
+    else:
+        return "decamDR1-{}".format(band.lower())
+
+
+def get_continuum_params(s, p):
+    """
+    Estimate a power-law for the continuum, based on the tractor photometry.
+
+    Args:
+        s: the "SPECINFO" table
+        p: the "PHOTINFO" or "PHOTV2INFO" table
+
+    Returns:
+        coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
+        betas: the slopes (np.array of floats)
+        weffs: the effective wavelengths of the photometry (np.array of floats)
+        phot_fs: the photometry fluxes (np.array of floats)
+        phot_ivs: the photometry inverse-variances (np.array of floats)
+
+    Notes:
+        (coeffs, betas) are to be used with cont_powerlaw(), ie:
+            flux[i] = coeffs[i] * ws ** betas[i]
+        Output coeffs[i] * ws ** betas[i] should be corresponding to the desi flux,
+            i.e. 1e-17 erg/cm2/s/A for total flux for psf object.
+        The code relies on the tractor g, r/r2, i/i2, z photometry.
+        From tractor the total flux is converted to fiberflux, then
+            MEAN_PSF_TO_FIBER_SPECFLUX is used to convert to
+            desi-like total psf flux.
+        Columns used from s:
+            TARGETID, MEAN_PSF_TO_FIBER_SPECFLUX
+        Columns used from p:
+            FLUX_{G,R/R2,I/I2,Z} and FLUX_IVAR_{G,R/R2,I/I2,Z}
+            FLUX_* and FIBERFLUX_*.
+        Output shapes:
+            coeffs, betas: (Nrow,)
+            weffs, phot_fs, phot_ivs: (Nrow, Nband).
+    """
+
+    # AR first grab the photometry totalflux -> fiberflux factor
+    # AR fiberflux columns will be there for tractor-based catalogs
+    # AR if no fiberflux columns (or valid values), we assume a psf profile
+    # AR with a fiberflux/totalflux=0.782
+    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
+    log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
+    tot2fibs = np.nan + np.zeros(len(p))
+    for ffkey in ffkeys:
+        #
+        sel = p[ffkey] != 0
+        xs = np.nan + np.zeros(len(p))
+        xs[sel] = p[ffkey][sel] / p[ffkey.replace("FIBERFLUX", "FLUX")][sel]
+        #
+        sel2 = (sel) & (np.isfinite(tot2fibs))
+        assert np.allclose(tot2fibs[sel2], xs[sel2], atol=1e-6)
+        #
+        sel2 = (sel) & (~np.isfinite(tot2fibs))
+        tot2fibs[sel2] = xs[sel2]
+    sel = ~np.isfinite(tot2fibs)
+    log.info("fill {}/{} rows with non-valid infos with tot2fibs=1/0.27".format(sel.sum(), len(p)))
+    tot2fibs[sel] = 0.782
+
+    # AR now grab the griz photometry
+    g_fkeys = [_ for _ in ["FLUX_G", "FLUX_G2"] if _ in p.colnames]
+    r_fkeys = [_ for _ in ["FLUX_R", "FLUX_R2"] if _ in p.colnames]
+    i_fkeys = [_ for _ in ["FLUX_I", "FLUX_I2"] if _ in p.colnames]
+    z_fkeys = [_ for _ in ["FLUX_Z", "FLUX_Z2"] if _ in p.colnames]
+    log.info(
+        "found these columns: r_fkeys={}, i_fkeys={}, z_fkeys={}".format(
+            ",".join(r_fkeys), ",".join(i_fkeys), ",".join(z_fkeys)
+        )
+    )
+    assert np.all(np.isin(g_fkeys, ["FLUX_G", "FLUX_G2"]))
+    assert np.all(np.isin(r_fkeys, ["FLUX_R", "FLUX_R2"]))
+    assert np.all(np.isin(i_fkeys, ["FLUX_I", "FLUX_I2"]))
+    assert np.all(np.isin(z_fkeys, ["FLUX_Z", "FLUX_Z2"]))
+
+    fkeys = g_fkeys + r_fkeys + i_fkeys + z_fkeys
+
+    # AR tractor total fluxes (nspec, nfilt)
+    phot_fs = np.array([p[k] for k in fkeys]).T
+    phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys]).T
+    for j in range(len(fkeys)):
+        # AR tractor fiber fluxes
+        phot_fs[:, j] *= tot2fibs
+        phot_ivs[:, j] /= tot2fibs ** 2
+        # AR (desi-like) psf fluxes
+        phot_fs[:, j] /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
+        phot_ivs[:, j] *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
+
+    # AR effective wavelengths
+    all_filts = speclite_filters.load_filters("hsc2017-*", "decamDR1-*")
+    all_filt_names = np.array([_.split("-")[-1] for _ in all_filts.names])
+    #
+    speclite_filtnames = np.zeros((len(p), len(fkeys)), dtype=object)
+    for bb_img in np.unique(p["BB_IMG"]):
+        sel = p["BB_IMG"] == bb_img
+        if bb_img == "":
+            log.warning("{} rows with empty bb_img".format(sel.sum()))
+            continue
+        assert np.all(speclite_filtnames[sel, :] == 0)
+        for j, fkey in enumerate(fkeys):
+            band = fkey.split("_")[1].lower()
+            sel2 = (sel) & (np.isfinite(p[fkey])) & (p[fkey] != 0)
+            speclite_filtnames[sel2, j] = get_speclite_filtname(bb_img, band)
+    weffs = np.nan + np.zeros((len(p), len(fkeys)))
+    unq_speclite_filtnames = np.unique(speclite_filtnames[speclite_filtnames != 0])
+    for speclite_filtname in unq_speclite_filtnames:
+        sel = speclite_filtnames == speclite_filtname
+        weffs[sel] = all_filts.effective_wavelengths[np.array(all_filts.names) == speclite_filtname]
+    for j, fkey in enumerate(fkeys):
+        log.info("{}/{} rows have weffs = np.nan".format((~np.isfinite(weffs[:, j])).sum(), len(p)))
+
+    # AR convert fluxes from nanonmaggies to erg/cm2/s/A
+    # AR https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
+    # AR first to Jy:
+    # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
+    # AR then to erg/s/cm2/A:
+    # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
+    # AR note we use factor_norm = 1e-18 in the calculcation to
+    # AR    keep reasonable numerical values.
+    factor_norm = 1e-18
+    for j in range(len(fkeys)):
+        factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs[:, j] ** 2)
+        factors /= factor_norm
+        phot_fs[:, j] *= factors
+        phot_ivs[:, j] /= factors ** 2
+
+    sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
+    phot_ivs[sel] = 0.
+
+    p0 = np.array([1e0, -2.])
+    bounds = ((0, -10), (1e16, 10))
+    coeffs, betas = np.nan + np.zeros(len(p)), np.nan + np.zeros(len(p))
+    for i in range(len(p)):
+        sel = phot_ivs[i] != 0
+        if sel.sum() == 0:
+            log.warning("no tractor flux for TARGETID={}".format(s["TARGETID"][i]))
+            continue
+        weffsi, phot_fsi, phot_ivsi = weffs[i, sel], phot_fs[i, sel], phot_ivs[i, sel]
+        popt, pcov = curve_fit(
+            cont_powerlaw,
+            weffsi,
+            phot_fsi,
+            maxfev=10000000,
+            p0=p0,
+            sigma=1. / np.sqrt(phot_ivsi),
+            bounds=bounds,
+        )
+        coeffs[i], betas[i] = popt[0], popt[1]
+
+    coeffs *= factor_norm
+    # AR then to 1e-17 erg/cm2/s/A
+    coeffs *= 1e17
+
+    phot_fs *= factor_norm * 1e17
+    phot_ivs /= (factor_norm * 1e17) ** 2
+
+    return betas, coeffs, weffs, phot_fs, phot_ivs
 
 
 def get_zelda_geometry_dict():

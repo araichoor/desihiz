@@ -11,6 +11,7 @@ from desihiz.extras_utils import (
     allowed_extras,
     get_rr,
     get_rrkeys,
+    get_continuum_params,
     get_default_zelda_dirs,
     get_zelda_fit,
     get_cnn,
@@ -111,7 +112,15 @@ def main():
     # zelda
     if "zelda" in args.extras.split(","):
 
-        d = Table(h[ext].data)
+        s = Table(h[ext].data)
+
+        if "PHOTV2INFO" in h:
+            p = Table(h["PHOTV2INFO"].data)
+        else:
+            p = Table(h["PHOTINFO"].data)
+
+        # get continuum params (coeff * lambda ** beta)
+        s["CONT_PL_BETA"], s["CONT_PL_COEFF"], _, _, _ = get_continuum_params(s, p)
 
         zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
             "RR_Z0_ZELDA",
@@ -134,9 +143,9 @@ def main():
             log.info(outpdf)
 
             if zkey in ["RR_Z0", "RR_Z1"]:
-                zs = d["RR_ALL_Z"][:, int(zkey[-1])]
+                zs = s["RR_ALL_Z"][:, int(zkey[-1])]
             else:
-                zs = d[zkey]
+                zs = s[zkey]
 
             log.info("running zelda with zkey={}; outpdf={}".format(zkey, outpdf))
             zd = get_zelda_fit(
@@ -144,7 +153,7 @@ def main():
                 zelda_dnn_dir,
                 zelda_model,
                 zelda_geometry,
-                d["TARGETID"],
+                s["TARGETID"],
                 zs,
                 h["BRZ_WAVE"].data,
                 h["BRZ_FLUX"].data,
@@ -156,12 +165,12 @@ def main():
             )
             for key in zd.colnames:
                 if key == "FIT":
-                    d[key_prefix] = zd[key]
+                    s[key_prefix] = zd[key]
                 else:
-                    d["{}_{}".format(key_prefix, key)] = zd[key]
+                    s["{}_{}".format(key_prefix, key)] = zd[key]
 
         # swap the extension
-        myh = fits.convenience.table_to_hdu(d)
+        myh = fits.convenience.table_to_hdu(s)
         for key in h[ext].header:
             if key not in myh.header:
                 myh.header[key] = h[ext].header[key]
