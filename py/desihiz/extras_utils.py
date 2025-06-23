@@ -220,7 +220,7 @@ def get_speclite_filtname(band, bb_img=None):
             return None
         if bb_img in ["CLAUDS", "HSC"]:
             if band.lower() in ["u", "us"]:
-                return "cfht_megacam-{}".format(band.lower())
+                return "cfht_megacam-{}".format(band.lower().replace("us", "ustar"))
             else:
                 return "hsc2017-{}".format(band.lower())
         else:
@@ -351,6 +351,7 @@ def get_continuum_params(s, p, zs, phot_bands):
     weffs = np.nan + np.zeros((nrow, nband))
     wmins, wmaxs = np.nan + np.zeros((nrow, nband)), np.nan + np.zeros((nrow, nband))
     unq_speclite_filtnames = np.unique(speclite_filtnames[speclite_filtnames != 0])
+    log.info("unq_speclite_filtnames = {}".format(", ".join(unq_speclite_filtnames)))
     for speclite_filtname in unq_speclite_filtnames:
         i_filt = [i for i in range(len(all_filts.names)) if all_filts.names[i] == speclite_filtname][0]
         sel = speclite_filtnames == speclite_filtname
