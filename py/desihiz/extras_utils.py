@@ -18,6 +18,7 @@ from desiutil.log import get_logger
 from speclite import filters as speclite_filters
 
 from desihiz.specphot_utils import get_smooth
+from fastspecfit.igm import Inoue14
 
 import Lya_zelda as zelda
 
@@ -30,6 +31,9 @@ allowed_extras = ["redrock", "zelda", "cnn"]
 
 allowed_zelda_models = ["outflow"]
 allowed_zelda_geometries = ["tsc"]
+
+igm = None
+igm_at_z = {}
 
 
 def get_rrkeys():
@@ -114,7 +118,28 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     return d
 
 
-def cont_powerlaw(ws, coeff, beta):
+def get_igm_inoue14(z, ws, zrounding=3, ref_ws=np.arange(4000, 10001)):
+
+    # AR Inoue+14
+    global igm
+    if igm is None:
+        igm = Inoue14()
+
+    # AR value at z
+    # AR force ws to be float (https://github.com/desihub/fastspecfit/issues/230)
+    global igm_at_z
+    zround_str = eval('"{:.'+str(zrounding)+'f}".format(z)')
+    if zround_str not in igm_at_z:
+        log.info("compute igm.full_IGM() for zround_str={}".format(zround_str))
+        if ref_ws.min() < wave_lya * (1 + float(zround_str)):
+            igm_at_z[zround_str] = np.ones_like(ref_ws)
+        else:
+            igm_at_z[zround_str] = igm.full_IGM(float(zround_str), ref_ws.astype(float))
+    # AR interpolate
+    return np.interp(ws, ref_ws, igm_at_z[zround_str])
+
+
+def cont_powerlaw(ws_zs, coeff, beta):
     """
     Returns a power law spectrum, used to model LAE/LBG continuum.
 
@@ -127,50 +152,114 @@ def cont_powerlaw(ws, coeff, beta):
         coeff * ws ** beta (np.array of floats)
     """
 
-    return coeff * ws ** beta
+    ws, zs = ws_zs
+    assert np.unique(zs).size == 1
+    z = zs[0]
+    conts = coeff * ws ** beta
+    if z is not None:
+        # taus = igm.full_IGM(z, ws)
+        taus = get_igm_inoue14(z, ws)
+        conts *= taus
+
+    return conts
 
 
-def get_speclite_filtname(bb_img, band):
+def get_allowed_phot_bands():
+
+    bb_bands = ["U", "US", "G", "R", "R2", "I", "I2", "Z", "Y"]
+    not_bb_bands = [
+        "N419", "N501", "N673",
+        "I427", "I464", "I484", "I505", "I527",
+        "M411", "M438", "M464", "M490", "M517"
+    ]
+    return bb_bands, not_bb_bands
+
+
+def get_speclite_all_filts():
+    """
+    All filters used so far in the DESI LAE/LBG TS photometry.
+    Args:
+        None
+
+    Returns:
+        speclite_filters.load_filters("odin-*", "suprime-*", "ibis-*", "cfht_megacam-*", "hsc2017-*", decamDR1-*")
+
+    Notes:
+        Will need to be updated.
+        For instance Merian N540 is not there.
+    """
+
+    return speclite_filters.load_filters(
+            "odin-*",
+            "suprime-*",
+            "ibis-*",
+            "cfht_megacam-*",
+            "hsc2017-*",
+            "decamDR1-*",
+        )
+
+
+def get_speclite_filtname(band, bb_img=None):
     """
     Get the speclite name for a band.
 
     Args:
-        bb_img: the broad-band imaging ("", "CLAUDS", "HSC", or "LS") (str)
+        band: the filter name (str)
+        bb_img (optional, defaults to None): the broad-band imaging ("", "CLAUDS", "HSC", or "LS") (str)
         band: the filter name (str)
 
     Returns:
-        "hsc2017-{band.lower} or "decamDR1-{band.lower}".
+        The related speclite "name" in the get_speclite_all_filts() output.
 
     Notes:
         if bb_img = "", then the function returns None.
     """
-
-    assert bb_img in ["", "CLAUDS", "HSC", "LS"]
-
-    if bb_img == "":
-        return None
-    if bb_img in ["CLAUDS", "HSC"]:
-        return "hsc2017-{}".format(band.lower())
+    if bb_img is not None:
+        assert bb_img in ["", "CLAUDS", "HSC", "LS"]
+        if bb_img == "":
+            return None
+        if bb_img in ["CLAUDS", "HSC"]:
+            if band.lower() in ["u", "us"]:
+                return "cfht_megacam-{}".format(band.lower())
+            else:
+                return "hsc2017-{}".format(band.lower())
+        else:
+            return "decamDR1-{}".format(band.lower())
     else:
-        return "decamDR1-{}".format(band.lower())
+        if band in ["N419", "N501", "N673"]:
+            return "odin-{}".format(band)
+        elif band in ["I427", "I464", "I484", "I505", "I527"]:
+            return "suprime-{}".format(band.replace("I", "IB"))
+        elif band in ["M411", "M438", "M464", "M490", "M517"]:
+            return "ibis-{}".format(band)
+        else:
+            msg = "unexpected band={}".format(band)
+            log.error(msg)
+            raise ValueError(msg)
 
 
-def get_continuum_params(s, p):
+def get_continuum_params(s, p, zs, phot_bands):
     """
     Estimate a power-law for the continuum, based on the tractor photometry.
 
     Args:
         s: the "SPECINFO" table
         p: the "PHOTINFO" or "PHOTV2INFO" table
+        zs: redshifts (np.array of floats)
+        phot_bands: list of photometric bands used for the continuum estimation (list of strs)
 
     Returns:
         coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
         betas: the slopes (np.array of floats)
         weffs: the effective wavelengths of the photometry (np.array of floats)
+        wmins: the minimum wavelengths of the bands (np.array of floats)
+        wmaxs: the maximum wavelengths of the bands (np.array of floats)
+        islyas: is the lya line falling in the band? (np.array of bools)
         phot_fs: the photometry fluxes (np.array of floats)
         phot_ivs: the photometry inverse-variances (np.array of floats)
 
     Notes:
+        If a band contains the lya line, we exclude it from the fit.
         (coeffs, betas) are to be used with cont_powerlaw(), ie:
             flux[i] = coeffs[i] * ws ** betas[i]
         Output coeffs[i] * ws ** betas[i] should be corresponding to the desi flux,
@@ -186,8 +275,11 @@ def get_continuum_params(s, p):
             FLUX_* and FIBERFLUX_*.
         Output shapes:
             coeffs, betas: (Nrow,)
-            weffs, phot_fs, phot_ivs: (Nrow, Nband).
+            weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs: (Nrow, Nband).
     """
+
+    nrow = len(p)
+    nband = len(phot_bands)
 
     # AR first grab the photometry totalflux -> fiberflux factor
     # AR fiberflux columns will be there for tractor-based catalogs
@@ -211,22 +303,20 @@ def get_continuum_params(s, p):
     log.info("fill {}/{} rows with non-valid infos with tot2fibs=1/0.27".format(sel.sum(), len(p)))
     tot2fibs[sel] = 0.782
 
-    # AR now grab the griz photometry
-    g_fkeys = [_ for _ in ["FLUX_G", "FLUX_G2"] if _ in p.colnames]
-    r_fkeys = [_ for _ in ["FLUX_R", "FLUX_R2"] if _ in p.colnames]
-    i_fkeys = [_ for _ in ["FLUX_I", "FLUX_I2"] if _ in p.colnames]
-    z_fkeys = [_ for _ in ["FLUX_Z", "FLUX_Z2"] if _ in p.colnames]
-    log.info(
-        "found these columns: r_fkeys={}, i_fkeys={}, z_fkeys={}".format(
-            ",".join(r_fkeys), ",".join(i_fkeys), ",".join(z_fkeys)
+    # AR now grab the photometry
+    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
+    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
+    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
+    log.info("bb_bands = {}".format(", ".join(bb_bands)))
+    log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
+    assert np.all(
+        np.isin(
+            np.unique(phot_bands),
+            np.unique(bb_bands + not_bb_bands)
         )
     )
-    assert np.all(np.isin(g_fkeys, ["FLUX_G", "FLUX_G2"]))
-    assert np.all(np.isin(r_fkeys, ["FLUX_R", "FLUX_R2"]))
-    assert np.all(np.isin(i_fkeys, ["FLUX_I", "FLUX_I2"]))
-    assert np.all(np.isin(z_fkeys, ["FLUX_Z", "FLUX_Z2"]))
 
-    fkeys = g_fkeys + r_fkeys + i_fkeys + z_fkeys
+    fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
 
     # AR tractor total fluxes (nspec, nfilt)
     phot_fs = np.array([p[k] for k in fkeys]).T
@@ -239,28 +329,53 @@ def get_continuum_params(s, p):
         phot_fs[:, j] /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
         phot_ivs[:, j] *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
 
+    # AR speclite filtname for each row/band
+    all_filts = get_speclite_all_filts()
+    speclite_filtnames = np.zeros((nrow, nband), dtype=object)
+    for j, band in enumerate(phot_bands):
+        if band in bb_bands:
+            for bb_img in np.unique(p["BB_IMG"]):
+                sel = p["BB_IMG"] == bb_img
+                if bb_img == "":
+                    log.warning("{} rows with empty bb_img".format(sel.sum()))
+                    continue
+                assert np.all(speclite_filtnames[sel, j] == 0)
+                sel &= (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0)
+                speclite_filtnames[sel, j] = get_speclite_filtname(band, bb_img=bb_img)
+        else:
+            assert band in not_bb_bands
+            speclite_filtnames[:, j] = get_speclite_filtname(band)
+
     # AR effective wavelengths
-    all_filts = speclite_filters.load_filters("hsc2017-*", "decamDR1-*")
-    all_filt_names = np.array([_.split("-")[-1] for _ in all_filts.names])
-    #
-    speclite_filtnames = np.zeros((len(p), len(fkeys)), dtype=object)
-    for bb_img in np.unique(p["BB_IMG"]):
-        sel = p["BB_IMG"] == bb_img
-        if bb_img == "":
-            log.warning("{} rows with empty bb_img".format(sel.sum()))
-            continue
-        assert np.all(speclite_filtnames[sel, :] == 0)
-        for j, fkey in enumerate(fkeys):
-            band = fkey.split("_")[1].lower()
-            sel2 = (sel) & (np.isfinite(p[fkey])) & (p[fkey] != 0)
-            speclite_filtnames[sel2, j] = get_speclite_filtname(bb_img, band)
-    weffs = np.nan + np.zeros((len(p), len(fkeys)))
+    # AR does the band cover lya? (we take a +/- 5A buffer)
+    weffs = np.nan + np.zeros((nrow, nband))
+    wmins, wmaxs = np.nan + np.zeros((nrow, nband)), np.nan + np.zeros((nrow, nband))
     unq_speclite_filtnames = np.unique(speclite_filtnames[speclite_filtnames != 0])
     for speclite_filtname in unq_speclite_filtnames:
+        i_filt = [i for i in range(len(all_filts.names)) if all_filts.names[i] == speclite_filtname][0]
         sel = speclite_filtnames == speclite_filtname
-        weffs[sel] = all_filts.effective_wavelengths[np.array(all_filts.names) == speclite_filtname]
-    for j, fkey in enumerate(fkeys):
-        log.info("{}/{} rows have weffs = np.nan".format((~np.isfinite(weffs[:, j])).sum(), len(p)))
+        weffs[sel] = all_filts.effective_wavelengths[i_filt]
+        tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
+        tmpws = tmpws[tmprs > 0.01 * tmprs]
+        wmins[sel], wmaxs[sel] = tmpws[0], tmpws[-1]
+    islyas = np.zeros((nrow, nband), dtype=bool)
+    for j in range(nband):
+        sel = wmins[:, j] < wave_lya * (1 + zs) + 5
+        sel &= wmaxs[:, j] > wave_lya * (1 + zs) - 5
+        islyas[sel, j] = True
+        print(phot_bands[j], islyas[sel, j].sum())
+
+    for j, band in enumerate(phot_bands):
+        log.info(
+            "band={}:\t{}/{} rows have weffs = np.nan".format(
+                band, (~np.isfinite(weffs[:, j])).sum(), nrow
+            )
+        )
+        log.info(
+            "band={}:\t{}/{} rows have {} * (1+zs) inside the band".format(
+                band, islyas[:, j].sum(), nrow, wave_lya
+            )
+        )
 
     # AR convert fluxes from nanonmaggies to erg/cm2/s/A
     # AR https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
@@ -277,21 +392,26 @@ def get_continuum_params(s, p):
         phot_fs[:, j] *= factors
         phot_ivs[:, j] /= factors ** 2
 
+    # AR set ivar to zero for non-valid values
     sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
     phot_ivs[sel] = 0.
+
+    # AR set ivar to zero for bands covering lya
+    phot_ivs[islyas] = 0.
 
     p0 = np.array([1e0, -2.])
     bounds = ((0, -10), (1e16, 10))
     coeffs, betas = np.nan + np.zeros(len(p)), np.nan + np.zeros(len(p))
-    for i in range(len(p)):
+    for i in range(nrow):
         sel = phot_ivs[i] != 0
+        sel &= np.isfinite(phot_fs[i])
         if sel.sum() == 0:
             log.warning("no tractor flux for TARGETID={}".format(s["TARGETID"][i]))
             continue
         weffsi, phot_fsi, phot_ivsi = weffs[i, sel], phot_fs[i, sel], phot_ivs[i, sel]
         popt, pcov = curve_fit(
             cont_powerlaw,
-            weffsi,
+            (weffsi, np.array([zs[i] for _ in weffsi])),
             phot_fsi,
             maxfev=10000000,
             p0=p0,
@@ -307,7 +427,7 @@ def get_continuum_params(s, p):
     phot_fs *= factor_norm * 1e17
     phot_ivs /= (factor_norm * 1e17) ** 2
 
-    return betas, coeffs, weffs, phot_fs, phot_ivs
+    return betas, coeffs, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
 
 
 def get_zelda_geometry_dict():
