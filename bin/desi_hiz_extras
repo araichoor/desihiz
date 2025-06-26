@@ -180,7 +180,7 @@ def main():
     # zelda
     if "zelda" in args.extras.split(","):
 
-        s = Table(h[ext].data)
+        d = Table(h[ext].data)
 
         zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
             "RR_Z0_ZELDA",
@@ -203,9 +203,9 @@ def main():
             log.info(outpdf)
 
             if zkey in ["RR_Z0", "RR_Z1"]:
-                zs = s["RR_ALL_Z"][:, int(zkey[-1])]
+                zs = d["RR_ALL_Z"][:, int(zkey[-1])]
             else:
-                zs = s[zkey]
+                zs = d[zkey]
 
             log.info("running zelda with zkey={}; outpdf={}".format(zkey, outpdf))
             zd = get_zelda_fit(
@@ -213,7 +213,7 @@ def main():
                 zelda_dnn_dir,
                 zelda_model,
                 zelda_geometry,
-                s["TARGETID"],
+                d["TARGETID"],
                 zs,
                 h["BRZ_WAVE"].data,
                 h["BRZ_FLUX"].data,
@@ -225,12 +225,12 @@ def main():
             )
             for key in zd.colnames:
                 if key == "FIT":
-                    s[key_prefix] = zd[key]
+                    d[key_prefix] = zd[key]
                 else:
-                    s["{}_{}".format(key_prefix, key)] = zd[key]
+                    d["{}_{}".format(key_prefix, key)] = zd[key]
 
         # swap the extension
-        myh = fits.convenience.table_to_hdu(s)
+        myh = fits.convenience.table_to_hdu(d)
         for key in h[ext].header:
             if key not in myh.header:
                 myh.header[key] = h[ext].header[key]
