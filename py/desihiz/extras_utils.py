@@ -558,6 +558,7 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
         p: the "PHOTINFO" or "PHOTV2INFO" table
         zs: redshifts (np.array of floats)
         phot_bands: list of photometric bands used for the continuum estimation (list of strs)
+        numproc: number of parallel processes (int)
 
     Returns:
         coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
