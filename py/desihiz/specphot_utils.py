@@ -48,6 +48,25 @@ def get_filt_fns():
             "{}_simulated_total_transmission_f3.6.txt".format(band),
         )
 
+    # ibis
+    for band in ["M411", "M438", "M464", "M490", "M517"]:
+        mydict["DECAM_{}".format(band)] = os.path.join(
+            mydir,
+            "ibis",
+            "filt",
+            "ibis-20241112-{}.ecsv".format(band),
+        )
+
+    # merian
+    for band in ["N540"]:
+        mydict["DECAM_{}".format(band)] = os.path.join(
+            mydir,
+            "ibis",
+            "filt",
+            "ibis-20240608-{}.ecsv".format(band),
+        )
+
+
     return mydict
 
 
