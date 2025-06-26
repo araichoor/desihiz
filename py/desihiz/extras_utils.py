@@ -523,6 +523,8 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     sel = (phot_ivs != 0) & (np.isfinite(phot_fs))
     if sel.sum() == 0:
         log.warning("no valid tractor flux for TARGETID={}".format(s["TARGETID"]))
+    elif ~np.isfinite(z):
+        log.warning("no finite z value for TARGETID={}".format(s["TARGETID"]))
     else:
         forfit_phot_fs = phot_fs[sel]
         forfit_phot_ivs = phot_ivs[sel]
@@ -637,6 +639,166 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
     phot_ivs = np.vstack([out[7] for out in outs])
 
     return coeffs, betas, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+
+
+def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas, coeffs, betas, ress):
+    """
+    Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
+
+    Args:
+        outpdf: output pdf file (str)
+        nplot: number of indiv. plots (int)
+        numproc: number of parallel processes (int)
+        s: the desi-{img}.fits SPECINFO table
+        zs: the redshift values (np.array of floats)
+        ws: the DESI spectroscopy wavelengths (np.array of floats)
+        fs: the DESI fluxes (np.array of floats)
+        ivs: the DESI inverse-variances (np.array of floats)
+        phot_bands: list of photometric bands possibly used for the continuum estimation (list of strs))
+        weffs: the effective wavelengths for the phot_bands (np.array of floats)
+        wmins: the minimimum wavelengths of the phot_bands (np.array of floats)
+        wmaxs: the maximimum wavelengths of the phot_bands (np.array of floats)
+        phot_fs: the photometric fluxes for phot_bands (np.array of floats)
+        phot_ivs: the photometric inverse-variance for phot_bands (np.array of floats)
+        islyas: are the phot_bands overlapping the lya line? (np.array of floats)
+        coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
+        betas: the slopes (np.array of floats)
+        ress: the spectra-phot_cont median residuals (np.array of floats)
+
+    Notes:
+        ws is a (Nrow) array, fs and ivs are (Nrow, Nwave) arrays.
+        phot_bands is a (Nrow) array
+        weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas are (Nrow, Nband) arrays.
+        coeffs, betas, ress are (Nrow) arrays.
+    """
+
+    tmpdir = tempfile.mkdtemp()
+    np.random.seed(1234)
+    if (len(s) < nplot) | (nplot is None):
+        ii = np.arange(len(s))
+    else:
+        ii = np.random.choice(len(s), size=nplot, replace=False)
+    outpngs = np.array([os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in range(len(s))])
+    titles = [
+        "TARGETID = {} (input_z = {:.2f})".format(tid, z)
+        for tid, z in zip(s["TARGETID"], zs)
+    ]
+    txtss = np.array([None for _ in zs])
+
+    myargs = [
+        (
+            outpngs[i],
+            s[i], zs[i], ws, fs[i], ivs[i],
+            phot_bands, weffs[i], wmins[i], wmaxs[i], phot_fs[i], phot_ivs[i], islyas[i],
+            coeffs[i], betas[i], ress[i],
+            titles[i], txtss[i],
+        ) for i in ii
+    ]
+    start = time()
+    log.info(
+        "launch pool for {} calls of plot_continuum_params_indiv() with {} processors".format(
+            len(myargs), numproc
+        )
+    )
+    pool = multiprocessing.Pool(numproc)
+    with pool:
+        ds = pool.starmap(plot_continuum_params_indiv, myargs)
+    log.info("plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
+
+    os.system("convert {} {}".format(" ".join(outpngs[ii]), outpdf))
+    for outpng in outpngs[ii]:
+        if outpng is not None:
+            os.remove(outpng)
+
+
+def plot_continuum_params_indiv(
+    outpng,
+    s, z, ws, fs_i, ivs_i,
+    phot_bands, weffs_i, wmins_i, wmaxs_i, phot_fs_i, phot_ivs_i, islyas_i,
+    coeff, beta, res,
+    title, txts
+):
+    """
+    Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
+
+    Args:
+        outpng: output png file (str)
+        s: the desi-{img}.fits SPECINFO table for a single row
+        z: the redshift value (float)
+        ws: the DESI spectroscopy wavelengths (np.array of floats)
+        fs_i: the DESI flux for the considered object (np.array of floats)
+        ivs_i: the DESI inverse-variance for the considered object (np.array of floats)
+        phot_bands: list of photometric bands possibly used for the continuum estimation (list of strs)
+        weffs_i: the effective wavelengths for the phot_bands (np.array of floats)
+        wmins_i: the minimimum wavelengths of the phot_bands (np.array of floats)
+        wmaxs_i: the maximimum wavelengths of the phot_bands (np.array of floats)
+        phot_fs_i: the photometric fluxes for phot_bands (np.array of floats)
+        phot_ivs_i: the photometric inverse-variance for phot_bands (np.array of floats)
+        islyas_i: are the phot_bands overlapping the lya line? (np.array of floats)
+        coeff: the multiplicative coefficient, in 1e-17 erg/s/cm2/A (floats)
+        beta: the slope (floats)
+        res: the spectra-phot_cont median residuals (float)
+        title: plot title (str)
+        txts: lines of text to print on the plot (list of str)
+
+    Notes:
+        phot_bands, weffs_i, wmins_i, wmaxs_i, phot_fs_i, phot_ivs_i, islyas_i are (Nband) arrays.
+    """
+
+    fig, ax = plt.subplots()
+    smf, _ = get_smooth(fs_i, ivs_i, 5)
+    ax.scatter(weffs_i[~islyas_i], phot_fs_i[~islyas_i], c="g", zorder=2, label="Tractor photometry (used)")
+    ax.scatter(weffs_i[islyas_i], phot_fs_i[islyas_i], marker="x", c="r", zorder=2, label="Tractor photometry (not used)")
+    y, dy = -0.05, -0.015
+    ii = weffs_i.argsort()
+    for band, weff, wmin, wmax, islya in zip(
+        phot_bands[ii], weffs_i[ii], wmins_i[ii], wmaxs_i[ii], islyas_i[ii]
+    ):
+        if islya:
+            col = "r"
+        else:
+            col = "g"
+        if np.isfinite(weff):
+            ax.plot([wmin, wmax], [y, y], color=col, lw=3, alpha=0.5)
+            ax.text(weff, y, band, color=col, ha="center", va="center")
+        y += dy
+    sel = (np.isfinite(phot_ivs_i)) & (phot_ivs_i != 0)
+    ax.errorbar(weffs_i[sel], phot_fs_i[sel], 1./np.sqrt(phot_ivs_i[sel]) ,color="none", ecolor="g", elinewidth=5, zorder=2)
+    conts = get_cont_powerlaw(ws, z, coeff, beta)
+    ax.plot(ws, conts, zorder=3, label="Model Power Law")
+    ax.plot(ws, smf, lw=0.5, zorder=1, label="DESI spectrum")
+    sel = (ws / (1 + z) > 1300) & (ws / (1 + z) < 1900)
+    ax.plot(ws[sel], ws[sel]*0+0.2, color="k", lw=3, alpha=0.5, label="Region for norm.")
+    ax.plot(ws, conts + res, lw=1, zorder=3, color="k", label="Renorm. model Power Law")
+    wcen = 1215.7 * (1 + z)
+    ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
+    ax.set_title(title)
+    x, y, dy = 0.5, 0.95, -0.05
+    if txts is not None:
+        for txt in txts:
+            ax.text(x, y, txt, transform=ax.transAxes)
+            y += dy
+    if ~np.isfinite(coeff):
+        ax.text(0.5, 0.70, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.70, "Cont. power-law coeff={:.2f}".format(coeff), transform=ax.transAxes)
+    if ~np.isfinite(beta):
+        ax.text(0.5, 0.65, "Cont. power-law beta=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.65, "Cont. power-law coeff={:.2f}".format(beta), transform=ax.transAxes)
+    if ~np.isfinite(res):
+        ax.text(0.5, 0.60, "Cont. power-law res=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.60, "(Cont. - spectrum) res.={:.3f}".format(res), transform=ax.transAxes)
+    ax.grid()
+    ax.set_axisbelow(True)
+    ax.set_xlim(3600, 9800)
+    ax.set_ylim(-0.25, 0.5)
+    ax.set_xlabel("Obs. wavelength [A]")
+    ax.set_ylabel("Flux [1e-17 erg/s/cm2/A]")
+    ax.legend(loc=2, fontsize=8)
+    plt.savefig(outpng, bbox_inches="tight")
+    plt.close()
 
 
 def get_zelda_geometry_dict():
