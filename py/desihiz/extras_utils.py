@@ -353,7 +353,6 @@ def get_speclite_filtname(band, bb_img=None):
     Args:
         band: the filter name (str)
         bb_img (optional, defaults to None): the broad-band imaging ("", "CLAUDS", "HSC", or "LS") (str)
-        band: the filter name (str)
 
     Returns:
         The related speclite "name" in the get_speclite_all_filts() output.
