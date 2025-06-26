@@ -705,7 +705,9 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
         ds = pool.starmap(plot_continuum_params_indiv, myargs)
     log.info("plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
 
+    start = time()
     os.system("convert {} {}".format(" ".join(outpngs[ii]), outpdf))
+    log.info("{} done (took {:.1f}s)".format(outpdf, time() - start))
     for outpng in outpngs[ii]:
         if outpng is not None:
             os.remove(outpng)

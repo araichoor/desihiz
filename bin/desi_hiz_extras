@@ -116,6 +116,7 @@ def main():
     if "cont" in args.extras.split(","):
 
         s = Table(h[ext].data)
+        nrow = len(s)
 
         if "PHOTV2INFO" in h:
             p = Table(h["PHOTV2INFO"].data)
@@ -124,6 +125,7 @@ def main():
         # photometric bands (for the continuum estimation)
         phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
         phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
+        nband = len(phot_bands)
 
         zkeys = ["RR_Z0", "RR_Z1", "VI_Z"]
 
@@ -137,17 +139,28 @@ def main():
             # column names
             coeffkey = "{}_CONT_PL_COEFF".format(zkey)
             betakey = "{}_CONT_PL_BETA".format(zkey)
-            reskey = "{}_CONT_RES_1600_1900".format(zkey)
+            reskey = "{}_CONT_RES_1300_1900".format(zkey)
+
+            # initialize
+            s["{}_CONT".format(zkey)], s[coeffkey], s[betakey] = False, np.nan, np.nan
+            weffs = np.nan + np.zeros((nrow, nband))
+            wmins = np.nan + np.zeros((nrow, nband))
+            wmaxs = np.nan + np.zeros((nrow, nband))
+            islyas = np.zeros((nrow, nband), dtype=bool)
+            phot_fs = np.nan + np.zeros((nrow, nband))
+            phot_ivs = np.nan + np.zeros((nrow, nband))
 
             # get continuum params (coeff * lambda ** beta)
-            s[coeffkey], s[betakey], weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs = get_continuum_params(s, p, zs, phot_bands, args.numproc)
+            # only consider z > 2 rows, as we use the IGM in the process
+            ii = np.where(zs > 2)[0]
+            if ii.size > 0:
+                s[coeffkey][ii], s[betakey][ii], weffs[ii], wmins[ii], wmaxs[ii], islyas[ii], phot_fs[ii], phot_ivs[ii] = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
 
             # successful fits
             sel = np.isfinite(zs)
             sel &= np.isfinite(s[coeffkey])
             sel &= np.isfinite(s[betakey])
             ii = np.where(sel)[0]
-            s["{}_CONT".format(zkey)] = False
             s["{}_CONT".format(zkey)][ii] = True
 
             # estimate the offset between 1300-1900A
