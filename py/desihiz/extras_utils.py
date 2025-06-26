@@ -172,9 +172,9 @@ def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
         zs: redshifts (np.array of floats)
         numproc: number of parallel process (int)
         zrounding (optional, defaults to 3): rounding to the redshift (int)
-        ref_ws (optional, defaults to np.arange(4000, 10001)): wavelengths to use (np.array of floats)
 
     Notes:
+        The used wavelength grid is from get_igm_ref_ws().
         Results are stored in igm_at_z[zround_str].
     """
 
