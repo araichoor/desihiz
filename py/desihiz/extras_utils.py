@@ -260,7 +260,6 @@ def get_powerlaw_desifs(specliteindxs_zs, coeff, beta):
     specliteindxs = specliteindxs.astype(int)
     nband = len(specliteindxs)
 
-    #all_filts = get_speclite_all_filts()
     speclitefilts = np.array([all_filts[_] for _ in specliteindxs])
     for specliteband in speclitefilts:
         assert hasattr(specliteband, "name")
