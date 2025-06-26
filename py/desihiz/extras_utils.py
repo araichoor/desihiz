@@ -451,8 +451,6 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
     bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
     not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
-    #log.info("bb_bands = {}".format(", ".join(bb_bands)))
-    #log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
     assert np.all(
         np.isin(
             np.unique(phot_bands),
@@ -474,13 +472,11 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
 
     # AR speclite filtname for each row/band
     bb_img = p["BB_IMG"]
-    #all_filts = get_speclite_all_filts()
     speclite_filtnames = np.zeros(nband, dtype=object)
     for j in range(nband):
         band = phot_bands[j]
         if band in bb_bands:
             if bb_img == "":
-                #log.warning("{} has empty bb_img".format(s["TARGETID"]))
                 continue
             if (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0):
                 speclite_filtnames[j] = get_speclite_filtname(band, bb_img=bb_img)
