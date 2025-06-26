@@ -155,7 +155,7 @@ def get_igm_ref_ws(wmin=4000, wmax=10000, dw=1):
     Args:
         wmin (optional, defaults to 4000): mininum wavelength in A (int)
         wmax (optional, defaults to 10000): maximum wavelength in A (int)
-        dw (optional, defaults to 0.1): the wavelength bin (float)
+        dw (optional, defaults to 1): the wavelength bin (float)
 
     Returns:
         np.arange(wmin, wmax + dw, dw)
