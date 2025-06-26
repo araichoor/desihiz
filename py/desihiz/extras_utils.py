@@ -9,6 +9,7 @@ import multiprocessing
 import fitsio
 import numpy as np
 from astropy.table import Table, vstack
+from astropy import units as u
 from scipy.optimize import curve_fit
 from matplotlib import pyplot as plt
 
@@ -19,6 +20,7 @@ from speclite import filters as speclite_filters
 
 from desihiz.specphot_utils import get_smooth
 from fastspecfit.igm import Inoue14
+import multiprocessing
 
 import Lya_zelda as zelda
 
@@ -27,13 +29,13 @@ log = get_logger()
 wave_lya = 1215.67
 wave_oii = 0.5 * (3726.1 + 3728.8)
 
-allowed_extras = ["redrock", "zelda", "cnn"]
+allowed_extras = ["redrock", "cont", "zelda", "cnn"]
 
 allowed_zelda_models = ["outflow"]
 allowed_zelda_geometries = ["tsc"]
 
 igm = None
-igm_at_z = {}
+igm_at_z = None
 
 
 def get_rrkeys():
@@ -118,7 +120,18 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     return d
 
 
-def get_igm_inoue14(z, ws, zrounding=3, ref_ws=np.arange(4000, 10001)):
+def get_igm_inoue14(z, ws, zrounding=3):
+    """
+    Compute the Inoue+14 IGM transmission for some wavelengths and a redshift.
+
+    Args:
+        z: redshift (float)
+        ws: wavelengths (np.array of floats)
+        zrounding (optional, defaults to 3): rounding to the redshift (int)
+
+    Returns:
+        igm_at_z: the transmission values (np.array of floats)
+    """
 
     # AR Inoue+14
     global igm
@@ -128,49 +141,168 @@ def get_igm_inoue14(z, ws, zrounding=3, ref_ws=np.arange(4000, 10001)):
     # AR value at z
     # AR force ws to be float (https://github.com/desihub/fastspecfit/issues/230)
     global igm_at_z
-    zround_str = eval('"{:.'+str(zrounding)+'f}".format(z)')
+    zround_str = "{0:.{1}f}".format(z, zrounding)
     if zround_str not in igm_at_z:
         log.info("compute igm.full_IGM() for zround_str={}".format(zround_str))
-        if ref_ws.min() < wave_lya * (1 + float(zround_str)):
-            igm_at_z[zround_str] = np.ones_like(ref_ws)
-        else:
-            igm_at_z[zround_str] = igm.full_IGM(float(zround_str), ref_ws.astype(float))
-    # AR interpolate
-    return np.interp(ws, ref_ws, igm_at_z[zround_str])
+        igm_at_z[zround_str] = igm.full_IGM(float(zround_str), get_igm_ref_ws())
+    return np.interp(ws, igm_at_z["wave"], igm_at_z[zround_str])
 
 
-def cont_powerlaw(ws_zs, coeff, beta):
+def get_igm_ref_ws(wmin=4000, wmax=10000, dw=1):
     """
-    Returns a power law spectrum, used to model LAE/LBG continuum.
+    Wavelengths grid for the global igm_at_z variable.
 
     Args:
-        ws: the wavelength array (in A preferentially) (np.array of floats)
+        wmin (optional, defaults to 4000): mininum wavelength in A (int)
+        wmax (optional, defaults to 10000): maximum wavelength in A (int)
+        dw (optional, defaults to 0.1): the wavelength bin (float)
+
+    Returns:
+        np.arange(wmin, wmax + dw, dw)
+    """
+
+    return np.arange(wmin, wmax + dw, dw, dtype=float)
+
+
+def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
+    """
+    Compute the Inoue+14 IGM transmission for different redshifts, recorded in the igm_at_z global variable..
+
+    Args:
+        zs: redshifts (np.array of floats)
+        numproc: number of parallel process (int)
+        zrounding (optional, defaults to 3): rounding to the redshift (int)
+        ref_ws (optional, defaults to np.arange(4000, 10001)): wavelengths to use (np.array of floats)
+
+    Notes:
+        Results are stored in igm_at_z[zround_str].
+    """
+
+    # AR Inoue+14
+    global igm
+    if igm is None:
+        igm = Inoue14()
+
+    global igm_at_z
+    if igm_at_z is None:
+        igm_at_z = {}
+        igm_at_z["wave"] = get_igm_ref_ws()
+
+    start = time()
+    zrounds = np.unique(zs.round(zrounding))
+    zround_strs = np.unique(["{0:.{1}f}".format(z, zrounding) for z in zs])
+    zround_strs = [_ for _ in zround_strs if _ not in igm_at_z]
+    myargs = [
+        (float(zround_str), igm_at_z["wave"].astype(float))
+        for zround_str in zround_strs if zround_str not in igm_at_z
+    ]
+    log.info("start computing igm.full_IGM() for {} values".format(len(myargs)))
+    pool = multiprocessing.Pool(processes=numproc)
+    with pool:
+        outs = pool.starmap(igm.full_IGM, myargs)
+    for zround_str, out in zip(zround_strs, outs):
+        igm_at_z[zround_str] = out
+    log.info("done computing igm.full_IGM() (took {:.1f}s)".format(time() - start))
+
+
+
+def get_cont_powerlaw(ws, z, coeff, beta):
+    """
+    Returns a power law spectrum, used to model LAE/LBG continuum, optionally including the IGM transmission.
+
+    Args:
+        ws: the wavelength array (in A) (np.array of floats)
+        z: the redshift (float)
         coeff: the multiplicative coefficient (float)
         beta: the slope (float)
 
     Returns:
-        coeff * ws ** beta (np.array of floats)
+        conts: the power law values (np.array of floats)
+
+    Notes:
+        If z is set to None, no IGM is used:
+            coeff * (ws / 1000) ** beta
+        else:
+            IGM_transmission * coeff * (ws / 1000) ** beta
     """
 
-    ws, zs = ws_zs
-    assert np.unique(zs).size == 1
-    z = zs[0]
-    conts = coeff * ws ** beta
+    conts = coeff * (ws / 1000) ** beta
     if z is not None:
-        # taus = igm.full_IGM(z, ws)
         taus = get_igm_inoue14(z, ws)
         conts *= taus
 
     return conts
 
 
+def get_powerlaw_desifs(specliteindxs_zs, coeff, beta):
+    """
+    Returns the flux values of a power law convolved with passbands.
+
+    Args:
+        specliteindxs_zs: (specliteindxs, zs) where
+            specliteindxs refers to the index in get_speclite_all_filts() output
+            and zs is repeats of the same redshift, with the same length as
+            specliteindxs
+        coeff: the multiplicative coefficient (float)
+        beta: the slope (float)
+
+    Returns:
+        filt_fs: the flux values.
+
+    Notes:
+        This function is used in the curve_fit() call in get_continuum_params().
+        curve_fit wants independent variables to have the same shape,
+        hence the speclitefilts_zs, with artificial zs, instead
+        of a single z value.
+    """
+
+    specliteindxs, zs = specliteindxs_zs
+    specliteindxs = specliteindxs.astype(int)
+    nband = len(specliteindxs)
+
+    #all_filts = get_speclite_all_filts()
+    speclitefilts = np.array([all_filts[_] for _ in specliteindxs])
+    for specliteband in speclitefilts:
+        assert hasattr(specliteband, "name")
+
+    assert np.unique(zs).size == 1
+    z = zs[0]
+
+    # AR get the power law (+igm) for all wavelengths
+    wmin = int(np.min([_.wavelength.min() for _ in speclitefilts])) - 10
+    wmax = int(np.max([_.wavelength.max() for _ in speclitefilts])) + 10
+    # ws = np.arange(wmin, wmax + 10, 10, dtype=float)
+    ws = np.arange(wmin, wmax + 1, 1, dtype=float)
+    assert np.all([_.wavelength.min() >= ws[0] for _ in speclitefilts])
+    assert np.all([_.wavelength.max() <= ws[-1] for _ in speclitefilts])
+    fs = get_cont_powerlaw(ws, z, coeff, beta)
+
+    # AR get the average over the filters
+    filt_fs = np.zeros(nband)
+    for i in range(nband):
+        filt_ws = speclitefilts[i].wavelength
+        filt_rs = speclitefilts[i].response
+        interp_fs = np.interp(filt_ws, ws, fs)
+        filt_fs[i] = np.trapz(interp_fs * filt_rs, filt_ws) / np.trapz(filt_rs, filt_ws)
+
+    return filt_fs
+
+
 def get_allowed_phot_bands():
+    """
+    Allowed bands in get_continuum_params().
+
+    Returns:
+        bb_bands: list of broad-bands (list of strs)
+        not_bb_bands: list of narrow-/medium-bands (list of strs)
+    """
 
     bb_bands = ["U", "US", "G", "R", "R2", "I", "I2", "Z", "Y"]
     not_bb_bands = [
         "N419", "N501", "N673",
         "I427", "I464", "I484", "I505", "I527",
-        "M411", "M438", "M464", "M490", "M517"
+        "M411", "M438", "M464", "M490", "M517",
+        "N540"
     ]
     return bb_bands, not_bb_bands
 
@@ -178,16 +310,31 @@ def get_allowed_phot_bands():
 def get_speclite_all_filts():
     """
     All filters used so far in the DESI LAE/LBG TS photometry.
-    Args:
-        None
 
     Returns:
-        speclite_filters.load_filters("odin-*", "suprime-*", "ibis-*", "cfht_megacam-*", "hsc2017-*", decamDR1-*")
+        speclite_filters.load_filters("odin-*", "suprime-*", "ibis-*", "cfht_megacam-*", "hsc2017-*", "decamDR1-*", "merian-*")
 
     Notes:
         Will need to be updated.
-        For instance Merian N540 is not there.
+        The Merian/N540 is from some file I have.
     """
+
+    # AR Merian/N540
+    from desihiz.specphot_utils import get_filt_fns
+    fn = get_filt_fns()["DECAM_N540"]
+    d = Table.read(fn)
+    d0 = Table()
+    d0["WAVE"] = [d["WAVE"][0] - np.diff(d["WAVE"])[0]]
+    d0["TRANS"] = 0.
+    d1 = Table()
+    d1["WAVE"] = [d["WAVE"][-1] + np.diff(d["WAVE"])[-1]]
+    d1["TRANS"] = 0.
+    d = vstack([d0, d, d1])
+    merian_n540 = speclite_filters.FilterResponse(
+        wavelength = d["WAVE"] * u.Angstrom,
+        response = d["TRANS"],
+        meta=dict(group_name="merian", band_name="N540")
+    )
 
     return speclite_filters.load_filters(
             "odin-*",
@@ -196,6 +343,7 @@ def get_speclite_all_filts():
             "cfht_megacam-*",
             "hsc2017-*",
             "decamDR1-*",
+            "merian-N540",
         )
 
 
@@ -232,13 +380,182 @@ def get_speclite_filtname(band, bb_img=None):
             return "suprime-{}".format(band.replace("I", "IB"))
         elif band in ["M411", "M438", "M464", "M490", "M517"]:
             return "ibis-{}".format(band)
+        elif band in ["N540"]:
+            return "merian-{}".format(band)
         else:
             msg = "unexpected band={}".format(band)
             log.error(msg)
             raise ValueError(msg)
 
 
-def get_continuum_params(s, p, zs, phot_bands):
+def get_continuum_params_indiv(s, p, z, phot_bands):
+    """
+    Estimate a power-law for the continuum, based on the tractor photometry.
+
+    Args:
+        s: the "SPECINFO" table for a single object
+        p: the "PHOTINFO" or "PHOTV2INFO" table for a single object
+        z: redshift (float)
+        phot_bands: list of photometric bands used for the continuum estimation (list of strs)
+
+    Returns:
+        coeff: the multiplicative coefficient, in 1e-17 erg/s/cm2/A (float)
+        beta: the slopes (float)
+        weffs: the effective wavelengths of the photometry (np.array of floats)
+        wmins: the minimum wavelengths of the bands (np.array of floats)
+        wmaxs: the maximum wavelengths of the bands (np.array of floats)
+        islyas: is the lya line falling in the band? (np.array of bools)
+        phot_fs: the photometry fluxes (np.array of floats)
+        phot_ivs: the photometry inverse-variances (np.array of floats)
+
+    Notes:
+        If a band contains the lya line, we exclude it from the fit.
+        (coeffs, betas) are to be used with get_cont_powerlaw(), ie:
+            flux[i] = IGM_trans * coeffs[i] * (ws / 1000) ** betas[i]
+        Output coeffs[i] * ws ** betas[i] should be corresponding to the desi flux,
+            i.e. 1e-17 erg/cm2/s/A for total flux for psf object.
+        The code relies on the tractor photometry.
+        From tractor the total flux is converted to fiberflux, then
+            MEAN_PSF_TO_FIBER_SPECFLUX is used to convert to
+            desi-like total psf flux.
+        Columns used from s:
+            TARGETID, MEAN_PSF_TO_FIBER_SPECFLUX
+        Columns used from p:
+            FLUX_{PHOT_BAND} and FLUX_IVAR_{PHOT_BAND}
+            FLUX_* and FIBERFLUX_*.
+        Output shapes:
+            coeffs, betas: scalars
+            weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs: (Nband)
+    """
+
+    assert isinstance(s["TARGETID"], np.int64)
+
+    nband = len(phot_bands)
+
+    # AR first grab the photometry totalflux -> fiberflux factor
+    # AR fiberflux columns will be there for tractor-based catalogs
+    # AR if no fiberflux columns (or valid values), we assume a psf profile
+    # AR with a fiberflux/totalflux=0.782
+    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
+    tot2fib = np.nan
+    for ffkey in ffkeys:
+        #
+        if p[ffkey] != 0:
+            x = p[ffkey] / p[ffkey.replace("FIBERFLUX", "FLUX")]
+            if np.isfinite(tot2fib):
+                assert np.abs(tot2fib - x) < 1e-6
+            else:
+                tot2fib = x
+    if ~np.isfinite(tot2fib):
+        tot2fib = 0.782
+
+    # AR now grab the photometry
+    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
+    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
+    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
+    #log.info("bb_bands = {}".format(", ".join(bb_bands)))
+    #log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
+    assert np.all(
+        np.isin(
+            np.unique(phot_bands),
+            np.unique(bb_bands + not_bb_bands)
+        )
+    )
+
+    fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
+
+    # AR tractor total fluxes (nband)
+    phot_fs = np.array([p[k] for k in fkeys])
+    phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys])
+    # AR tractor fiber fluxes
+    phot_fs *= tot2fib
+    phot_ivs /= tot2fib ** 2
+    # AR (desi-like) psf fluxes
+    phot_fs /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
+    phot_ivs *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
+
+    # AR speclite filtname for each row/band
+    bb_img = p["BB_IMG"]
+    #all_filts = get_speclite_all_filts()
+    speclite_filtnames = np.zeros(nband, dtype=object)
+    for j in range(nband):
+        band = phot_bands[j]
+        if band in bb_bands:
+            if bb_img == "":
+                #log.warning("{} has empty bb_img".format(s["TARGETID"]))
+                continue
+            if (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0):
+                speclite_filtnames[j] = get_speclite_filtname(band, bb_img=bb_img)
+        else:
+            assert band in not_bb_bands
+            speclite_filtnames[j] = get_speclite_filtname(band)
+
+    # AR effective wavelengths
+    weffs = np.nan + np.zeros(nband)
+    wmins = np.nan + np.zeros(nband)
+    wmaxs = np.nan + np.zeros(nband)
+    for j in range(nband):
+        speclite_filtname = speclite_filtnames[j]
+        if speclite_filtname != 0:
+            i_filt = [_ for _ in range(len(all_filts.names)) if all_filts.names[_] == speclite_filtname][0]
+            weffs[j] = all_filts.effective_wavelengths[i_filt].value
+            tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
+            tmpws = tmpws[tmprs > 0.01 * tmprs]
+            wmins[j], wmaxs[j] = tmpws[0], tmpws[-1]
+
+    # AR does the band cover lya? (we take a +/- 5A buffer)
+    islyas = (wmins < wave_lya * (1 + z) + 5) & (wmaxs > wave_lya * (1 + z) - 5)
+
+    # AR convert fluxes from nanonmaggies to 1e-17 * erg/cm2/s/A
+    # AR https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
+    # AR first to Jy:
+    # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
+    # AR then to erg/s/cm2/A:
+    # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
+    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs ** 2) * 1e17
+    phot_fs *= factors
+    phot_ivs /= factors ** 2
+
+    # AR set ivar to zero for non-valid values
+    sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
+    phot_ivs[sel] = 0.
+
+    # AR set ivar to zero for bands covering lya
+    phot_ivs[islyas] = 0.
+
+    coeff, beta = np.nan, np.nan
+    p0 = np.array([1., -2.])
+    bounds = ((0, -5), (100, 5))
+    sel = (phot_ivs != 0) & (np.isfinite(phot_fs))
+    if sel.sum() == 0:
+        log.warning("no valid tractor flux for TARGETID={}".format(s["TARGETID"]))
+    else:
+        forfit_phot_fs = phot_fs[sel]
+        forfit_phot_ivs = phot_ivs[sel]
+        forfit_filt_indxs = []
+        for filtname in speclite_filtnames[sel]:
+            forfit_filt_indxs.append([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname][0])
+        try:
+            popt, pcov = curve_fit(
+                get_powerlaw_desifs,
+                (
+                    forfit_filt_indxs,
+                    np.array([z for _ in weffs[sel]])
+                ),
+                forfit_phot_fs,
+                maxfev=10000000,
+                p0=p0,
+                sigma=1. / np.sqrt(forfit_phot_ivs),
+                bounds=bounds,
+            )
+            coeff, beta = popt[0], popt[1]
+        except ValueError:
+            log.warning("fit failed for TARGETID={}".format(s["TARGETID"]))
+
+    return coeff, beta, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+
+
+def get_continuum_params(s, p, zs, phot_bands, numproc):
     """
     Estimate a power-law for the continuum, based on the tractor photometry.
 
@@ -260,48 +577,32 @@ def get_continuum_params(s, p, zs, phot_bands):
 
     Notes:
         If a band contains the lya line, we exclude it from the fit.
-        (coeffs, betas) are to be used with cont_powerlaw(), ie:
-            flux[i] = coeffs[i] * ws ** betas[i]
+        (coeffs, betas) are to be used with get_cont_powerlaw(), ie:
+            flux[i] = IGM_trans * coeffs[i] * (ws / 1000) ** betas[i]
         Output coeffs[i] * ws ** betas[i] should be corresponding to the desi flux,
             i.e. 1e-17 erg/cm2/s/A for total flux for psf object.
-        The code relies on the tractor g, r/r2, i/i2, z photometry.
+        The code relies on the tractor photometry.
         From tractor the total flux is converted to fiberflux, then
             MEAN_PSF_TO_FIBER_SPECFLUX is used to convert to
             desi-like total psf flux.
         Columns used from s:
             TARGETID, MEAN_PSF_TO_FIBER_SPECFLUX
         Columns used from p:
-            FLUX_{G,R/R2,I/I2,Z} and FLUX_IVAR_{G,R/R2,I/I2,Z}
+            FLUX_{PHOT_BAND} and FLUX_IVAR_{PHOT_BAND}
             FLUX_* and FIBERFLUX_*.
         Output shapes:
-            coeffs, betas: (Nrow,)
-            weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs: (Nrow, Nband).
+            coeffs, betas: (Nrow)
+            weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs: (Nrow, Nband)
     """
 
     nrow = len(p)
-    nband = len(phot_bands)
 
-    # AR first grab the photometry totalflux -> fiberflux factor
-    # AR fiberflux columns will be there for tractor-based catalogs
-    # AR if no fiberflux columns (or valid values), we assume a psf profile
-    # AR with a fiberflux/totalflux=0.782
-    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
-    log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
-    tot2fibs = np.nan + np.zeros(len(p))
-    for ffkey in ffkeys:
-        #
-        sel = p[ffkey] != 0
-        xs = np.nan + np.zeros(len(p))
-        xs[sel] = p[ffkey][sel] / p[ffkey.replace("FIBERFLUX", "FLUX")][sel]
-        #
-        sel2 = (sel) & (np.isfinite(tot2fibs))
-        assert np.allclose(tot2fibs[sel2], xs[sel2], atol=1e-6)
-        #
-        sel2 = (sel) & (~np.isfinite(tot2fibs))
-        tot2fibs[sel2] = xs[sel2]
-    sel = ~np.isfinite(tot2fibs)
-    log.info("fill {}/{} rows with non-valid infos with tot2fibs=1/0.27".format(sel.sum(), len(p)))
-    tot2fibs[sel] = 0.782
+    # AR
+    global all_filts
+    all_filts = get_speclite_all_filts()
+
+    # AR first build the Inoue14 grid
+    build_igm_inoue14_zgrid(zs, numproc)
 
     # AR now grab the photometry
     allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
@@ -316,119 +617,31 @@ def get_continuum_params(s, p, zs, phot_bands):
         )
     )
 
-    fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
+    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
+    log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
 
-    # AR tractor total fluxes (nspec, nfilt)
-    phot_fs = np.array([p[k] for k in fkeys]).T
-    phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys]).T
-    for j in range(len(fkeys)):
-        # AR tractor fiber fluxes
-        phot_fs[:, j] *= tot2fibs
-        phot_ivs[:, j] /= tot2fibs ** 2
-        # AR (desi-like) psf fluxes
-        phot_fs[:, j] /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
-        phot_ivs[:, j] *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
+    # AR launch fit on each spectrum
+    myargs = [
+        (s[i], p[i], zs[i], phot_bands) for i in range(nrow)
+    ]
+    start = time()
+    log.info("launch get_continuum_params_indiv() for {} spectra".format(nrow))
+    pool = multiprocessing.Pool(processes=numproc)
+    with pool:
+        outs = pool.starmap(get_continuum_params_indiv, myargs)
 
-    # AR speclite filtname for each row/band
-    all_filts = get_speclite_all_filts()
-    speclite_filtnames = np.zeros((nrow, nband), dtype=object)
-    for j, band in enumerate(phot_bands):
-        if band in bb_bands:
-            for bb_img in np.unique(p["BB_IMG"]):
-                sel = p["BB_IMG"] == bb_img
-                if bb_img == "":
-                    log.warning("{} rows with empty bb_img".format(sel.sum()))
-                    continue
-                assert np.all(speclite_filtnames[sel, j] == 0)
-                sel &= (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0)
-                speclite_filtnames[sel, j] = get_speclite_filtname(band, bb_img=bb_img)
-        else:
-            assert band in not_bb_bands
-            speclite_filtnames[:, j] = get_speclite_filtname(band)
+    log.info("done computing get_continuum_params_indiv() for {} spectra (took {:.1f}s)".format(nrow, time() - start))
 
-    # AR effective wavelengths
-    # AR does the band cover lya? (we take a +/- 5A buffer)
-    weffs = np.nan + np.zeros((nrow, nband))
-    wmins, wmaxs = np.nan + np.zeros((nrow, nband)), np.nan + np.zeros((nrow, nband))
-    unq_speclite_filtnames = np.unique(speclite_filtnames[speclite_filtnames != 0])
-    log.info("unq_speclite_filtnames = {}".format(", ".join(unq_speclite_filtnames)))
-    for speclite_filtname in unq_speclite_filtnames:
-        i_filt = [i for i in range(len(all_filts.names)) if all_filts.names[i] == speclite_filtname][0]
-        sel = speclite_filtnames == speclite_filtname
-        weffs[sel] = all_filts.effective_wavelengths[i_filt]
-        tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
-        tmpws = tmpws[tmprs > 0.01 * tmprs]
-        wmins[sel], wmaxs[sel] = tmpws[0], tmpws[-1]
-    islyas = np.zeros((nrow, nband), dtype=bool)
-    for j in range(nband):
-        sel = wmins[:, j] < wave_lya * (1 + zs) + 5
-        sel &= wmaxs[:, j] > wave_lya * (1 + zs) - 5
-        islyas[sel, j] = True
-        print(phot_bands[j], islyas[sel, j].sum())
+    coeffs = np.array([out[0] for out in outs])
+    betas = np.array([out[1] for out in outs])
+    weffs = np.vstack([out[2] for out in outs])
+    wmins = np.vstack([out[3] for out in outs])
+    wmaxs = np.vstack([out[4] for out in outs])
+    islyas = np.vstack([out[5] for out in outs])
+    phot_fs = np.vstack([out[6] for out in outs])
+    phot_ivs = np.vstack([out[7] for out in outs])
 
-    for j, band in enumerate(phot_bands):
-        log.info(
-            "band={}:\t{}/{} rows have weffs = np.nan".format(
-                band, (~np.isfinite(weffs[:, j])).sum(), nrow
-            )
-        )
-        log.info(
-            "band={}:\t{}/{} rows have {} * (1+zs) inside the band".format(
-                band, islyas[:, j].sum(), nrow, wave_lya
-            )
-        )
-
-    # AR convert fluxes from nanonmaggies to erg/cm2/s/A
-    # AR https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
-    # AR first to Jy:
-    # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
-    # AR then to erg/s/cm2/A:
-    # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
-    # AR note we use factor_norm = 1e-18 in the calculcation to
-    # AR    keep reasonable numerical values.
-    factor_norm = 1e-18
-    for j in range(len(fkeys)):
-        factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs[:, j] ** 2)
-        factors /= factor_norm
-        phot_fs[:, j] *= factors
-        phot_ivs[:, j] /= factors ** 2
-
-    # AR set ivar to zero for non-valid values
-    sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
-    phot_ivs[sel] = 0.
-
-    # AR set ivar to zero for bands covering lya
-    phot_ivs[islyas] = 0.
-
-    p0 = np.array([1e0, -2.])
-    bounds = ((0, -10), (1e16, 10))
-    coeffs, betas = np.nan + np.zeros(len(p)), np.nan + np.zeros(len(p))
-    for i in range(nrow):
-        sel = phot_ivs[i] != 0
-        sel &= np.isfinite(phot_fs[i])
-        if sel.sum() == 0:
-            log.warning("no tractor flux for TARGETID={}".format(s["TARGETID"][i]))
-            continue
-        weffsi, phot_fsi, phot_ivsi = weffs[i, sel], phot_fs[i, sel], phot_ivs[i, sel]
-        popt, pcov = curve_fit(
-            cont_powerlaw,
-            (weffsi, np.array([zs[i] for _ in weffsi])),
-            phot_fsi,
-            maxfev=10000000,
-            p0=p0,
-            sigma=1. / np.sqrt(phot_ivsi),
-            bounds=bounds,
-        )
-        coeffs[i], betas[i] = popt[0], popt[1]
-
-    coeffs *= factor_norm
-    # AR then to 1e-17 erg/cm2/s/A
-    coeffs *= 1e17
-
-    phot_fs *= factor_norm * 1e17
-    phot_ivs /= (factor_norm * 1e17) ** 2
-
-    return betas, coeffs, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+    return coeffs, betas, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
 
 
 def get_zelda_geometry_dict():
@@ -864,6 +1077,7 @@ def get_zelda_fit(
             )
         )
 
+    start = time()
     log.info(
         "launch pool for {} calls of get_zelda_fit_one_spectrum() with {} processors".format(
             len(myargs), numproc
@@ -872,6 +1086,7 @@ def get_zelda_fit(
     pool = multiprocessing.Pool(numproc)
     with pool:
         ds = pool.starmap(get_zelda_fit_one_spectrum, myargs)
+    log.info("get_zelda_fit_one_spectrum() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
 
     d = vstack(ds)
 

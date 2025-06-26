@@ -12,6 +12,7 @@ from desihiz.extras_utils import (
     get_rr,
     get_rrkeys,
     get_continuum_params,
+    get_cont_powerlaw,
     get_default_zelda_dirs,
     get_zelda_fit,
     get_cnn,
@@ -109,8 +110,9 @@ def main():
         i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
         h[i] = myh
 
-    # zelda
-    if "zelda" in args.extras.split(","):
+
+    # cont
+    if "cont" in args.extras.split(","):
 
         s = Table(h[ext].data)
 
@@ -118,9 +120,67 @@ def main():
             p = Table(h["PHOTV2INFO"].data)
         else:
             p = Table(h["PHOTINFO"].data)
+        # photometric bands (for the continuum estimation)
+        phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+        phot_bands = [_ for _ in phot_bands if _ != "SYNTHG"]
 
-        # get continuum params (coeff * lambda ** beta)
-        s["CONT_PL_BETA"], s["CONT_PL_COEFF"], _, _, _ = get_continuum_params(s, p)
+        zkeys = ["RR_Z0", "RR_Z1", "VI_Z"]
+
+        for zkey in zkeys:
+
+            if zkey in ["RR_Z0", "RR_Z1"]:
+                zs = s["RR_ALL_Z"][:, int(zkey[-1])]
+            else:
+                zs = s[zkey]
+
+            # initialize
+            s["{}_CONT".format(zkey)] = False
+            s["{}_CONT_PL_COEFF".format(zkey)] = np.nan
+            s["{}_CONT_PL_BETA".format(zkey)] = np.nan
+            s["{}_CONT_RES_1600_1900".format(zkey)] = np.nan
+
+            ii = np.where(np.isfinite(zs))[0]
+            log.info("found {}/{} valid {} zs to estimate the continuum for".format(ii.size, len(s), zkey))
+            if ii.size == 0:
+                continue
+
+            # get continuum params (coeff * lambda ** beta)
+            s["{}_CONT_PL_COEFF".format(zkey)][ii], s["{}_CONT_PL_BETA".format(zkey)][ii], _, _, _, _, _, _ = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
+
+            # successful fits
+            sel = np.isfinite(zs)
+            sel &= np.isfinite(s["{}_CONT_PL_COEFF".format(zkey)])
+            sel &= np.isfinite(s["{}_CONT_PL_BETA".format(zkey)])
+            ii = np.where(sel)[0]
+            s["{}_CONT".format(zkey)][ii] = True
+
+            # estimate the offset between 1600-1900A
+            ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
+            for i in ii:
+                conts = get_cont_powerlaw(
+                    ws,
+                    zs[i],
+                    s["{}_CONT_PL_COEFF".format(zkey)][i],
+                    s["{}_CONT_PL_BETA".format(zkey)][i]
+                )
+                sel = (ws / (1 + zs[i]) > 1300) & (ws / (1 + zs[i]) < 1900)
+                if sel.sum() > 10:
+                    s["{}_CONT_RES_1600_1900".format(zkey)][i] = np.median(fs[i, sel] - conts[sel])
+
+        # swap the extension
+        myh = fits.convenience.table_to_hdu(s)
+        for key in h[ext].header:
+            if key not in myh.header:
+                myh.header[key] = h[ext].header[key]
+
+        i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
+        h[i] = myh
+
+
+    # zelda
+    if "zelda" in args.extras.split(","):
+
+        s = Table(h[ext].data)
 
         zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
             "RR_Z0_ZELDA",
