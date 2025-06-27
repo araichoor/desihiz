@@ -7,22 +7,27 @@ from astropy.io import fits
 from astropy.table import Table, vstack
 from desiutil.log import get_logger
 from desiutil.redirect import stdouterr_redirected
-from desihiz.extras_utils import (
-    allowed_extras,
+from desihiz.extras_rr_cnn import (
     get_rr,
     get_rrkeys,
+    get_cnn,
+    get_cnnkeys,
+)
+from desihiz.extras_phot_continuum import (
     get_continuum_params_ress_default_wlohi,
     get_continuum_params,
     get_continuum_params_ress,
     plot_continuum_params,
+)
+from desihiz.extras_zelda import (
     get_default_zelda_dirs,
     get_zelda_fit,
-    get_cnn,
-    get_cnnkeys,
 )
 from argparse import ArgumentParser
 
 log = get_logger()
+
+allowed_extras = ["redrock", "cont", "zelda", "cnn"]
 
 
 def parse():
@@ -112,7 +117,6 @@ def main():
         i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
         h[i] = myh
 
-
     # cont
     if "cont" in args.extras.split(","):
 
@@ -127,7 +131,9 @@ def main():
         ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
 
         # photometric bands (for the continuum estimation)
-        phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+        phot_bands = [
+            _.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"
+        ]
         phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
         nband = len(phot_bands)
 
@@ -160,27 +166,52 @@ def main():
             # only consider z > 2 rows, as we use the IGM in the process
             ii = np.where(zs > 2)[0]
             if ii.size > 0:
-                s[coeffkey][ii], s[betakey][ii], weffs[ii], wmins[ii], wmaxs[ii], islyas[ii], phot_fs[ii], phot_ivs[ii] = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
-                s[reskey][ii] = get_continuum_params_ress(s[coeffkey][ii], s[betakey][ii], ws, fs[ii], ivs[ii], zs[ii])
+                (
+                    s[coeffkey][ii],
+                    s[betakey][ii],
+                    weffs[ii],
+                    wmins[ii],
+                    wmaxs[ii],
+                    islyas[ii],
+                    phot_fs[ii],
+                    phot_ivs[ii],
+                ) = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
+                s[reskey][ii] = get_continuum_params_ress(
+                    s[coeffkey][ii], s[betakey][ii], ws, fs[ii], ivs[ii], zs[ii]
+                )
 
             # plot
-            outpdf = args.mergefn.replace(".fits", "-photcont-{}.pdf".format(zkey.lower()))
+            outpdf = args.mergefn.replace(
+                ".fits", "-photcont-{}.pdf".format(zkey.lower())
+            )
             log.info(outpdf)
 
-            nplot = 1000 # pick random nplot spectra
+            nplot = 1000  # pick random nplot spectra
             np.random.seed(1234)
             if ii.size < nplot:
                 jj = ii
             else:
                 jj = np.random.choice(ii, size=nplot, replace=False)
             plot_continuum_params(
-                outpdf, nplot, args.numproc,
-                s[ii], zs[ii],
-                ws, fs[ii], ivs[ii],
-                phot_bands, weffs[ii], wmins[ii], wmaxs[ii], phot_fs[ii], phot_ivs[ii], islyas[ii],
-                s[coeffkey][ii], s[betakey][ii], s[reskey][ii],
+                outpdf,
+                nplot,
+                args.numproc,
+                s[ii],
+                zs[ii],
+                ws,
+                fs[ii],
+                ivs[ii],
+                phot_bands,
+                weffs[ii],
+                wmins[ii],
+                wmaxs[ii],
+                phot_fs[ii],
+                phot_ivs[ii],
+                islyas[ii],
+                s[coeffkey][ii],
+                s[betakey][ii],
+                s[reskey][ii],
             )
-
 
         # swap the extension
         myh = fits.convenience.table_to_hdu(s)
@@ -190,7 +221,6 @@ def main():
 
         i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
         h[i] = myh
-
 
     # zelda
     if "zelda" in args.extras.split(","):

@@ -474,7 +474,11 @@ def get_zelda_fit(
     pool = multiprocessing.Pool(numproc)
     with pool:
         ds = pool.starmap(get_zelda_fit_one_spectrum, myargs)
-    log.info("get_zelda_fit_one_spectrum() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
+    log.info(
+        "get_zelda_fit_one_spectrum() on {} spectra done (took {:.1f}s)".format(
+            len(myargs), time() - start
+        )
+    )
 
     d = vstack(ds)
 

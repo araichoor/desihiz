@@ -95,7 +95,8 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     d["Z_01_BEST"] = d["Z"].copy()
     sel = d["DELTACHI2"] < dchi2_0_min
     sel &= (
-        np.abs((1 + d["ALL_Z"][:, 0]) * wave_oii / wave_lya - 1 - d["ALL_Z"][:, 1]) < 0.01
+        np.abs((1 + d["ALL_Z"][:, 0]) * wave_oii / wave_lya - 1 - d["ALL_Z"][:, 1])
+        < 0.01
     )
     d["Z_01_BEST"][sel] = d["ALL_Z"][:, 1][sel]
 
@@ -111,11 +112,12 @@ def get_cnnkeys():
 
     return keys
 
+
 def get_cnn(tids, cnnfn):
 
     d = Table()
-    d["CL"] = -99. + np.zeros(len(tids))
-    d["Z"] = -99.
+    d["CL"] = -99.0 + np.zeros(len(tids))
+    d["Z"] = -99.0
 
     # read the cnn file
     c = Table(fitsio.read(cnnfn))
@@ -129,7 +131,11 @@ def get_cnn(tids, cnnfn):
     log.info("found {} {} files".format(len(fns), pattern))
     rr = vstack([Table(fitsio.read(fn, "REDSHIFTS")) for fn in fns])
     ii, iirr = match(tids, rr["TARGETID"])
-    log.info("{}/{} TARGETIDs are in the {} {} files".format(ii.size, len(d), len(fns), pattern))
+    log.info(
+        "{}/{} TARGETIDs are in the {} {} files".format(
+            ii.size, len(d), len(fns), pattern
+        )
+    )
     d["Z"][ii] = rr["Z"][iirr]
 
     return d

@@ -106,7 +106,8 @@ def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
     zround_strs = [_ for _ in zround_strs if _ not in igm_at_z]
     myargs = [
         (float(zround_str), igm_at_z["wave"].astype(float))
-        for zround_str in zround_strs if zround_str not in igm_at_z
+        for zround_str in zround_strs
+        if zround_str not in igm_at_z
     ]
     log.info("start computing igm.full_IGM() for {} values".format(len(myargs)))
     pool = multiprocessing.Pool(processes=numproc)
@@ -115,7 +116,6 @@ def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
     for zround_str, out in zip(zround_strs, outs):
         igm_at_z[zround_str] = out
     log.info("done computing igm.full_IGM() (took {:.1f}s)".format(time() - start))
-
 
 
 def get_cont_powerlaw(ws, z, coeff, beta):
@@ -210,10 +210,20 @@ def get_allowed_phot_bands():
 
     bb_bands = ["U", "US", "G", "R", "R2", "I", "I2", "Z", "Y"]
     not_bb_bands = [
-        "N419", "N501", "N673",
-        "I427", "I464", "I484", "I505", "I527",
-        "M411", "M438", "M464", "M490", "M517",
-        "N540"
+        "N419",
+        "N501",
+        "N673",
+        "I427",
+        "I464",
+        "I484",
+        "I505",
+        "I527",
+        "M411",
+        "M438",
+        "M464",
+        "M490",
+        "M517",
+        "N540",
     ]
     return bb_bands, not_bb_bands
 
@@ -232,30 +242,31 @@ def get_speclite_all_filts():
 
     # AR Merian/N540
     from desihiz.specphot_utils import get_filt_fns
+
     fn = get_filt_fns()["DECAM_N540"]
     d = Table.read(fn)
     d0 = Table()
     d0["WAVE"] = [d["WAVE"][0] - np.diff(d["WAVE"])[0]]
-    d0["TRANS"] = 0.
+    d0["TRANS"] = 0.0
     d1 = Table()
     d1["WAVE"] = [d["WAVE"][-1] + np.diff(d["WAVE"])[-1]]
-    d1["TRANS"] = 0.
+    d1["TRANS"] = 0.0
     d = vstack([d0, d, d1])
     merian_n540 = speclite_filters.FilterResponse(
-        wavelength = d["WAVE"] * u.Angstrom,
-        response = d["TRANS"],
-        meta=dict(group_name="merian", band_name="N540")
+        wavelength=d["WAVE"] * u.Angstrom,
+        response=d["TRANS"],
+        meta=dict(group_name="merian", band_name="N540"),
     )
 
     return speclite_filters.load_filters(
-            "odin-*",
-            "suprime-*",
-            "ibis-*",
-            "cfht_megacam-*",
-            "hsc2017-*",
-            "decamDR1-*",
-            "merian-N540",
-        )
+        "odin-*",
+        "suprime-*",
+        "ibis-*",
+        "cfht_megacam-*",
+        "hsc2017-*",
+        "decamDR1-*",
+        "merian-N540",
+    )
 
 
 def get_speclite_filtname(band, bb_img=None):
@@ -368,12 +379,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
     bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
     not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
-    assert np.all(
-        np.isin(
-            np.unique(phot_bands),
-            np.unique(bb_bands + not_bb_bands)
-        )
-    )
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
 
     fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
 
@@ -382,7 +388,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys])
     # AR tractor fiber fluxes
     phot_fs *= tot2fib
-    phot_ivs /= tot2fib ** 2
+    phot_ivs /= tot2fib**2
     # AR (desi-like) psf fluxes
     phot_fs /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
     phot_ivs *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
@@ -408,7 +414,11 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     for j in range(nband):
         speclite_filtname = speclite_filtnames[j]
         if speclite_filtname != 0:
-            i_filt = [_ for _ in range(len(all_filts.names)) if all_filts.names[_] == speclite_filtname][0]
+            i_filt = [
+                _
+                for _ in range(len(all_filts.names))
+                if all_filts.names[_] == speclite_filtname
+            ][0]
             weffs[j] = all_filts.effective_wavelengths[i_filt].value
             tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
             tmpws = tmpws[tmprs > 0.01 * tmprs]
@@ -423,19 +433,19 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
     # AR then to erg/s/cm2/A:
     # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
-    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs ** 2) * 1e17
+    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs**2) * 1e17
     phot_fs *= factors
-    phot_ivs /= factors ** 2
+    phot_ivs /= factors**2
 
     # AR set ivar to zero for non-valid values
     sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
-    phot_ivs[sel] = 0.
+    phot_ivs[sel] = 0.0
 
     # AR set ivar to zero for bands covering lya
-    phot_ivs[islyas] = 0.
+    phot_ivs[islyas] = 0.0
 
     coeff, beta = np.nan, np.nan
-    p0 = np.array([1., -2.])
+    p0 = np.array([1.0, -2.0])
     bounds = ((0, -5), (100, 5))
     sel = (phot_ivs != 0) & (np.isfinite(phot_fs))
     if sel.sum() == 0:
@@ -447,18 +457,21 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
         forfit_phot_ivs = phot_ivs[sel]
         forfit_filt_indxs = []
         for filtname in speclite_filtnames[sel]:
-            forfit_filt_indxs.append([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname][0])
+            forfit_filt_indxs.append(
+                [
+                    _
+                    for _ in range(len(all_filts.names))
+                    if all_filts.names[_] == filtname
+                ][0]
+            )
         try:
             popt, pcov = curve_fit(
                 get_powerlaw_desifs,
-                (
-                    forfit_filt_indxs,
-                    np.array([z for _ in weffs[sel]])
-                ),
+                (forfit_filt_indxs, np.array([z for _ in weffs[sel]])),
                 forfit_phot_fs,
                 maxfev=10000000,
                 p0=p0,
-                sigma=1. / np.sqrt(forfit_phot_ivs),
+                sigma=1.0 / np.sqrt(forfit_phot_ivs),
                 bounds=bounds,
             )
             coeff, beta = popt[0], popt[1]
@@ -525,27 +538,24 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
     not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
     log.info("bb_bands = {}".format(", ".join(bb_bands)))
     log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
-    assert np.all(
-        np.isin(
-            np.unique(phot_bands),
-            np.unique(bb_bands + not_bb_bands)
-        )
-    )
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
 
     ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
     log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
 
     # AR launch fit on each spectrum
-    myargs = [
-        (s[i], p[i], zs[i], phot_bands) for i in range(nrow)
-    ]
+    myargs = [(s[i], p[i], zs[i], phot_bands) for i in range(nrow)]
     start = time()
     log.info("launch get_continuum_params_indiv() for {} spectra".format(nrow))
     pool = multiprocessing.Pool(processes=numproc)
     with pool:
         outs = pool.starmap(get_continuum_params_indiv, myargs)
 
-    log.info("done computing get_continuum_params_indiv() for {} spectra (took {:.1f}s)".format(nrow, time() - start))
+    log.info(
+        "done computing get_continuum_params_indiv() for {} spectra (took {:.1f}s)".format(
+            nrow, time() - start
+        )
+    )
 
     coeffs = np.array([out[0] for out in outs])
     betas = np.array([out[1] for out in outs])
@@ -606,7 +616,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         assert hasattr(betas, "__len__")
         assert len(fs.shape) == 2
         assert len(ivs.shape) == 2
-        assert hasattr(zs,  "__len__")
+        assert hasattr(zs, "__len__")
         nrow, nwave = fs.shape
         assert ws.shape[0] == nwave
         assert ivs.shape == (nrow, nwave)
@@ -625,12 +635,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         res = np.nan
         ok = (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas))
         if (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas)):
-            conts = get_cont_powerlaw(
-                ws,
-                zs,
-                coeffs,
-                betas
-            )
+            conts = get_cont_powerlaw(ws, zs, coeffs, betas)
             sel = (ws / (1 + zs) > rf_wlo) & (ws / (1 + zs) < rf_whi)
             if sel.sum() > 10:
                 ress = np.median(fs[sel] - conts[sel])
@@ -641,12 +646,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         ii = np.where(sel)[0]
         ress = np.nan + np.zeros(len(zs))
         for i in ii:
-            conts = get_cont_powerlaw(
-                ws,
-                zs[i],
-                coeffs[i],
-                betas[i]
-            )
+            conts = get_cont_powerlaw(ws, zs[i], coeffs[i], betas[i])
             sel = (ws / (1 + zs[i]) > rf_wlo) & (ws / (1 + zs[i]) < rf_whi)
             if sel.sum() > 10:
                 ress[i] = np.median(fs[i, sel] - conts[sel])
@@ -654,7 +654,26 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
     return ress
 
 
-def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas, coeffs, betas, ress):
+def plot_continuum_params(
+    outpdf,
+    nplot,
+    numproc,
+    s,
+    zs,
+    ws,
+    fs,
+    ivs,
+    phot_bands,
+    weffs,
+    wmins,
+    wmaxs,
+    phot_fs,
+    phot_ivs,
+    islyas,
+    coeffs,
+    betas,
+    ress,
+):
     """
     Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
 
@@ -691,7 +710,9 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
         ii = np.arange(len(s))
     else:
         ii = np.random.choice(len(s), size=nplot, replace=False)
-    outpngs = np.array([os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in range(len(s))])
+    outpngs = np.array(
+        [os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in range(len(s))]
+    )
     titles = [
         "TARGETID = {} (input_z = {:.2f})".format(tid, z)
         for tid, z in zip(s["TARGETID"], zs)
@@ -701,11 +722,25 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
     myargs = [
         (
             outpngs[i],
-            s[i], zs[i], ws, fs[i], ivs[i],
-            phot_bands, weffs[i], wmins[i], wmaxs[i], phot_fs[i], phot_ivs[i], islyas[i],
-            coeffs[i], betas[i], ress[i],
-            titles[i], txtss[i],
-        ) for i in ii
+            s[i],
+            zs[i],
+            ws,
+            fs[i],
+            ivs[i],
+            phot_bands,
+            weffs[i],
+            wmins[i],
+            wmaxs[i],
+            phot_fs[i],
+            phot_ivs[i],
+            islyas[i],
+            coeffs[i],
+            betas[i],
+            ress[i],
+            titles[i],
+            txtss[i],
+        )
+        for i in ii
     ]
     start = time()
     log.info(
@@ -716,7 +751,11 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
     pool = multiprocessing.Pool(numproc)
     with pool:
         ds = pool.starmap(plot_continuum_params_indiv, myargs)
-    log.info("plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
+    log.info(
+        "plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(
+            len(myargs), time() - start
+        )
+    )
 
     start = time()
     os.system("convert {} {}".format(" ".join(outpngs[ii]), outpdf))
@@ -728,10 +767,23 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
 
 def plot_continuum_params_indiv(
     outpng,
-    s, z, ws, fs_i, ivs_i,
-    phot_bands, weffs_i, wmins_i, wmaxs_i, phot_fs_i, phot_ivs_i, islyas_i,
-    coeff, beta, res,
-    title, txts
+    s,
+    z,
+    ws,
+    fs_i,
+    ivs_i,
+    phot_bands,
+    weffs_i,
+    wmins_i,
+    wmaxs_i,
+    phot_fs_i,
+    phot_ivs_i,
+    islyas_i,
+    coeff,
+    beta,
+    res,
+    title,
+    txts,
 ):
     """
     Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
@@ -762,8 +814,21 @@ def plot_continuum_params_indiv(
 
     fig, ax = plt.subplots()
     smf, _ = get_smooth(fs_i, ivs_i, 5)
-    ax.scatter(weffs_i[~islyas_i], phot_fs_i[~islyas_i], c="g", zorder=2, label="Tractor photometry (used)")
-    ax.scatter(weffs_i[islyas_i], phot_fs_i[islyas_i], marker="x", c="r", zorder=2, label="Tractor photometry (not used)")
+    ax.scatter(
+        weffs_i[~islyas_i],
+        phot_fs_i[~islyas_i],
+        c="g",
+        zorder=2,
+        label="Tractor photometry (used)",
+    )
+    ax.scatter(
+        weffs_i[islyas_i],
+        phot_fs_i[islyas_i],
+        marker="x",
+        c="r",
+        zorder=2,
+        label="Tractor photometry (not used)",
+    )
     y, dy = -0.05, -0.015
     ii = weffs_i.argsort()
     for band, weff, wmin, wmax, islya in zip(
@@ -778,12 +843,22 @@ def plot_continuum_params_indiv(
             ax.text(weff, y, band, color=col, ha="center", va="center")
         y += dy
     sel = (np.isfinite(phot_ivs_i)) & (phot_ivs_i != 0)
-    ax.errorbar(weffs_i[sel], phot_fs_i[sel], 1./np.sqrt(phot_ivs_i[sel]) ,color="none", ecolor="g", elinewidth=5, zorder=2)
+    ax.errorbar(
+        weffs_i[sel],
+        phot_fs_i[sel],
+        1.0 / np.sqrt(phot_ivs_i[sel]),
+        color="none",
+        ecolor="g",
+        elinewidth=5,
+        zorder=2,
+    )
     conts = get_cont_powerlaw(ws, z, coeff, beta)
     ax.plot(ws, conts, zorder=3, label="Model Power Law")
     ax.plot(ws, smf, lw=0.5, zorder=1, label="DESI spectrum")
     sel = (ws / (1 + z) > 1300) & (ws / (1 + z) < 1900)
-    ax.plot(ws[sel], ws[sel]*0+0.2, color="k", lw=3, alpha=0.5, label="Region for norm.")
+    ax.plot(
+        ws[sel], ws[sel] * 0 + 0.2, color="k", lw=3, alpha=0.5, label="Region for norm."
+    )
     ax.plot(ws, conts + res, lw=1, zorder=3, color="k", label="Renorm. model Power Law")
     wcen = 1215.7 * (1 + z)
     ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
@@ -791,15 +866,30 @@ def plot_continuum_params_indiv(
     if ~np.isfinite(coeff):
         ax.text(0.5, 0.95, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.95, "Cont. power-law coeff={:.2f}".format(coeff), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.95,
+            "Cont. power-law coeff={:.2f}".format(coeff),
+            transform=ax.transAxes,
+        )
     if ~np.isfinite(beta):
         ax.text(0.5, 0.90, "Cont. power-law beta=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.90, "Cont. power-law beta={:.2f}".format(beta), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.90,
+            "Cont. power-law beta={:.2f}".format(beta),
+            transform=ax.transAxes,
+        )
     if ~np.isfinite(res):
         ax.text(0.5, 0.85, "Cont. power-law res=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.85, "(Cont. - spectrum) res.={:.3f}".format(res), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.85,
+            "(Cont. - spectrum) res.={:.3f}".format(res),
+            transform=ax.transAxes,
+        )
     x, y, dy = 0.5, 0.80, -0.05
     if txts is not None:
         for txt in txts:
@@ -839,23 +929,53 @@ def wrapper_continuum_params_indiv(outpng, fn, tid, zkey, title, txts):
 
     ii = np.where(s["TARGETID"] == tid)[0]
     if ii.size == 0:
-        log.warning("no match for TARGETID={} in {}; no {} generated".format(tid, fn, outpng))
+        log.warning(
+            "no match for TARGETID={} in {}; no {} generated".format(tid, fn, outpng)
+        )
         return None
     if ii.size > 1:
-        log.warning("{} matches found for TARGETID={} in {}; pick the first occurence".format(tid, fn))
+        log.warning(
+            "{} matches found for TARGETID={} in {}; pick the first occurence".format(
+                tid, fn
+            )
+        )
     i = ii[0]
 
-    phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+    phot_bands = [
+        _.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"
+    ]
     phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
 
-    coeff, beta, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs = get_continuum_params_indiv(s[i], p[i], s[zkey][i], phot_bands)
+    (
+        coeff,
+        beta,
+        weffs,
+        wmins,
+        wmaxs,
+        islyas,
+        phot_fs,
+        phot_ivs,
+    ) = get_continuum_params_indiv(s[i], p[i], s[zkey][i], phot_bands)
 
     res = get_continuum_params_ress(coeff, beta, ws, fs[i], ivs[i], s[zkey][i])
 
     plot_continuum_params_indiv(
         outpng,
-        s[i], s[zkey][i], ws, fs[i], ivs[i],
-        phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas,
-        coeff, beta, res,
-        title, txts
+        s[i],
+        s[zkey][i],
+        ws,
+        fs[i],
+        ivs[i],
+        phot_bands,
+        weffs,
+        wmins,
+        wmaxs,
+        phot_fs,
+        phot_ivs,
+        islyas,
+        coeff,
+        beta,
+        res,
+        title,
+        txts,
     )
