@@ -2,9 +2,7 @@
 
 import os
 import tempfile
-import pickle
 from time import time
-from glob import glob
 import multiprocessing
 import fitsio
 import numpy as np
@@ -14,111 +12,20 @@ from astropy import units as u
 from scipy.optimize import curve_fit
 from matplotlib import pyplot as plt
 
-from desitarget.geomask import match_to, match
-from redrock.results import read_zscan
 from desiutil.log import get_logger
 from speclite import filters as speclite_filters
 
 from desihiz.specphot_utils import get_smooth
+from desihiz.extras_rr_cnn import wave_lya
 from fastspecfit.igm import Inoue14
-import multiprocessing
 
-import Lya_zelda as zelda
 
 log = get_logger()
 
-wave_lya = 1215.67
-wave_oii = 0.5 * (3726.1 + 3728.8)
-
-allowed_extras = ["redrock", "cont", "zelda", "cnn"]
-
-allowed_zelda_models = ["outflow"]
-allowed_zelda_geometries = ["tsc"]
 
 igm = None
 igm_at_z = None
 all_filts = None
-
-def get_rrkeys():
-
-    keys = [
-        "Z",
-        "ZERR",
-        "ZWARN",
-        "CHI2",
-        "COEFF",
-        "FITMETHOD",
-        "NPIXELS",
-        "SPECTYPE",
-        "SUBTYPE",
-        "NCOEFF",
-        "DELTACHI2",
-    ]
-    keys += ["ALL_Z", "ALL_SPECTYPE", "ALL_DELTACHI2", "RRFN"]
-    keys += ["Z_01_BEST"]
-
-    return keys
-
-
-def get_rrfn(cofn, rrsubdir):
-
-    return os.path.join(
-        os.path.dirname(cofn),
-        rrsubdir,
-        os.path.basename(cofn).replace("coadd", "redrock"),
-    )
-
-
-def read_rrfn(rrfn):
-
-    start = time()
-    nbest = 9
-    d = Table.read(rrfn, "REDSHIFTS")
-    _, zfit = read_zscan(rrfn.replace("redrock", "rrdetails").replace(".fits", ".h5"))
-    assert len(zfit) == nbest * len(d)
-    assert np.all(zfit["targetid"][::nbest] == d["TARGETID"])
-    for key in ["Z", "SPECTYPE", "DELTACHI2"]:
-        d["ALL_{}".format(key)] = zfit[key.lower()].reshape((len(d), nbest))
-    d["RRFN"] = rrfn
-    d.meta = None
-    log.info("{:.1f}s\t{}\t{}".format(time() - start, len(d), rrfn))
-    return d
-
-
-def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
-
-    # read redrock
-    rrfns = [get_rrfn(cofn, rrsubdir) for cofn in np.unique(cofns)]
-    pool = multiprocessing.Pool(numproc)
-    with pool:
-        rrs = pool.map(read_rrfn, rrfns)
-    d = vstack(rrs)
-
-    # propagate redrock outputs
-    unqids = np.array(
-        [
-            "{}-{}".format(tid, get_rrfn(cofn, rrsubdir))
-            for tid, cofn in zip(tids, cofns)
-        ]
-    )
-    rrunqids = np.array(
-        ["{}-{}".format(tid, rrfn) for tid, rrfn in zip(d["TARGETID"], d["RRFN"])]
-    )
-    ii = match_to(rrunqids, unqids)
-    assert np.all(rrunqids[ii] == unqids)
-    d = d[ii]
-
-    # add a "best" redshift:
-    # - if DELTACHI2 > dchi2_0_min -> keep Z=Z_0
-    # - if (DELTACHI2 < dchi2_0_min) & (oii is picked but lya is the 2nd best z) -> take Z_1
-    d["Z_01_BEST"] = d["Z"].copy()
-    sel = d["DELTACHI2"] < dchi2_0_min
-    sel &= (
-        np.abs((1 + d["ALL_Z"][:, 0]) * wave_oii / wave_lya - 1 - d["ALL_Z"][:, 1]) < 0.01
-    )
-    d["Z_01_BEST"][sel] = d["ALL_Z"][:, 1][sel]
-
-    return d
 
 
 def get_igm_inoue14(z, ws, zrounding=3):
@@ -199,7 +106,8 @@ def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
     zround_strs = [_ for _ in zround_strs if _ not in igm_at_z]
     myargs = [
         (float(zround_str), igm_at_z["wave"].astype(float))
-        for zround_str in zround_strs if zround_str not in igm_at_z
+        for zround_str in zround_strs
+        if zround_str not in igm_at_z
     ]
     log.info("start computing igm.full_IGM() for {} values".format(len(myargs)))
     pool = multiprocessing.Pool(processes=numproc)
@@ -208,7 +116,6 @@ def build_igm_inoue14_zgrid(zs, numproc, zrounding=3):
     for zround_str, out in zip(zround_strs, outs):
         igm_at_z[zround_str] = out
     log.info("done computing igm.full_IGM() (took {:.1f}s)".format(time() - start))
-
 
 
 def get_cont_powerlaw(ws, z, coeff, beta):
@@ -303,10 +210,20 @@ def get_allowed_phot_bands():
 
     bb_bands = ["U", "US", "G", "R", "R2", "I", "I2", "Z", "Y"]
     not_bb_bands = [
-        "N419", "N501", "N673",
-        "I427", "I464", "I484", "I505", "I527",
-        "M411", "M438", "M464", "M490", "M517",
-        "N540"
+        "N419",
+        "N501",
+        "N673",
+        "I427",
+        "I464",
+        "I484",
+        "I505",
+        "I527",
+        "M411",
+        "M438",
+        "M464",
+        "M490",
+        "M517",
+        "N540",
     ]
     return bb_bands, not_bb_bands
 
@@ -325,30 +242,31 @@ def get_speclite_all_filts():
 
     # AR Merian/N540
     from desihiz.specphot_utils import get_filt_fns
+
     fn = get_filt_fns()["DECAM_N540"]
     d = Table.read(fn)
     d0 = Table()
     d0["WAVE"] = [d["WAVE"][0] - np.diff(d["WAVE"])[0]]
-    d0["TRANS"] = 0.
+    d0["TRANS"] = 0.0
     d1 = Table()
     d1["WAVE"] = [d["WAVE"][-1] + np.diff(d["WAVE"])[-1]]
-    d1["TRANS"] = 0.
+    d1["TRANS"] = 0.0
     d = vstack([d0, d, d1])
     merian_n540 = speclite_filters.FilterResponse(
-        wavelength = d["WAVE"] * u.Angstrom,
-        response = d["TRANS"],
-        meta=dict(group_name="merian", band_name="N540")
+        wavelength=d["WAVE"] * u.Angstrom,
+        response=d["TRANS"],
+        meta=dict(group_name="merian", band_name="N540"),
     )
 
     return speclite_filters.load_filters(
-            "odin-*",
-            "suprime-*",
-            "ibis-*",
-            "cfht_megacam-*",
-            "hsc2017-*",
-            "decamDR1-*",
-            "merian-N540",
-        )
+        "odin-*",
+        "suprime-*",
+        "ibis-*",
+        "cfht_megacam-*",
+        "hsc2017-*",
+        "decamDR1-*",
+        "merian-N540",
+    )
 
 
 def get_speclite_filtname(band, bb_img=None):
@@ -461,12 +379,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
     bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
     not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
-    assert np.all(
-        np.isin(
-            np.unique(phot_bands),
-            np.unique(bb_bands + not_bb_bands)
-        )
-    )
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
 
     fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
 
@@ -475,7 +388,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys])
     # AR tractor fiber fluxes
     phot_fs *= tot2fib
-    phot_ivs /= tot2fib ** 2
+    phot_ivs /= tot2fib**2
     # AR (desi-like) psf fluxes
     phot_fs /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
     phot_ivs *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
@@ -501,7 +414,11 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     for j in range(nband):
         speclite_filtname = speclite_filtnames[j]
         if speclite_filtname != 0:
-            i_filt = [_ for _ in range(len(all_filts.names)) if all_filts.names[_] == speclite_filtname][0]
+            i_filt = [
+                _
+                for _ in range(len(all_filts.names))
+                if all_filts.names[_] == speclite_filtname
+            ][0]
             weffs[j] = all_filts.effective_wavelengths[i_filt].value
             tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
             tmpws = tmpws[tmprs > 0.01 * tmprs]
@@ -516,19 +433,19 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
     # AR then to erg/s/cm2/A:
     # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
-    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs ** 2) * 1e17
+    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs**2) * 1e17
     phot_fs *= factors
-    phot_ivs /= factors ** 2
+    phot_ivs /= factors**2
 
     # AR set ivar to zero for non-valid values
     sel = (~np.isfinite(weffs)) | (~np.isfinite(phot_fs))
-    phot_ivs[sel] = 0.
+    phot_ivs[sel] = 0.0
 
     # AR set ivar to zero for bands covering lya
-    phot_ivs[islyas] = 0.
+    phot_ivs[islyas] = 0.0
 
     coeff, beta = np.nan, np.nan
-    p0 = np.array([1., -2.])
+    p0 = np.array([1.0, -2.0])
     bounds = ((0, -5), (100, 5))
     sel = (phot_ivs != 0) & (np.isfinite(phot_fs))
     if sel.sum() == 0:
@@ -540,18 +457,21 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
         forfit_phot_ivs = phot_ivs[sel]
         forfit_filt_indxs = []
         for filtname in speclite_filtnames[sel]:
-            forfit_filt_indxs.append([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname][0])
+            forfit_filt_indxs.append(
+                [
+                    _
+                    for _ in range(len(all_filts.names))
+                    if all_filts.names[_] == filtname
+                ][0]
+            )
         try:
             popt, pcov = curve_fit(
                 get_powerlaw_desifs,
-                (
-                    forfit_filt_indxs,
-                    np.array([z for _ in weffs[sel]])
-                ),
+                (forfit_filt_indxs, np.array([z for _ in weffs[sel]])),
                 forfit_phot_fs,
                 maxfev=10000000,
                 p0=p0,
-                sigma=1. / np.sqrt(forfit_phot_ivs),
+                sigma=1.0 / np.sqrt(forfit_phot_ivs),
                 bounds=bounds,
             )
             coeff, beta = popt[0], popt[1]
@@ -618,27 +538,24 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
     not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
     log.info("bb_bands = {}".format(", ".join(bb_bands)))
     log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
-    assert np.all(
-        np.isin(
-            np.unique(phot_bands),
-            np.unique(bb_bands + not_bb_bands)
-        )
-    )
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
 
     ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
     log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
 
     # AR launch fit on each spectrum
-    myargs = [
-        (s[i], p[i], zs[i], phot_bands) for i in range(nrow)
-    ]
+    myargs = [(s[i], p[i], zs[i], phot_bands) for i in range(nrow)]
     start = time()
     log.info("launch get_continuum_params_indiv() for {} spectra".format(nrow))
     pool = multiprocessing.Pool(processes=numproc)
     with pool:
         outs = pool.starmap(get_continuum_params_indiv, myargs)
 
-    log.info("done computing get_continuum_params_indiv() for {} spectra (took {:.1f}s)".format(nrow, time() - start))
+    log.info(
+        "done computing get_continuum_params_indiv() for {} spectra (took {:.1f}s)".format(
+            nrow, time() - start
+        )
+    )
 
     coeffs = np.array([out[0] for out in outs])
     betas = np.array([out[1] for out in outs])
@@ -699,7 +616,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         assert hasattr(betas, "__len__")
         assert len(fs.shape) == 2
         assert len(ivs.shape) == 2
-        assert hasattr(zs,  "__len__")
+        assert hasattr(zs, "__len__")
         nrow, nwave = fs.shape
         assert ws.shape[0] == nwave
         assert ivs.shape == (nrow, nwave)
@@ -718,12 +635,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         res = np.nan
         ok = (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas))
         if (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas)):
-            conts = get_cont_powerlaw(
-                ws,
-                zs,
-                coeffs,
-                betas
-            )
+            conts = get_cont_powerlaw(ws, zs, coeffs, betas)
             sel = (ws / (1 + zs) > rf_wlo) & (ws / (1 + zs) < rf_whi)
             if sel.sum() > 10:
                 ress = np.median(fs[sel] - conts[sel])
@@ -734,12 +646,7 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
         ii = np.where(sel)[0]
         ress = np.nan + np.zeros(len(zs))
         for i in ii:
-            conts = get_cont_powerlaw(
-                ws,
-                zs[i],
-                coeffs[i],
-                betas[i]
-            )
+            conts = get_cont_powerlaw(ws, zs[i], coeffs[i], betas[i])
             sel = (ws / (1 + zs[i]) > rf_wlo) & (ws / (1 + zs[i]) < rf_whi)
             if sel.sum() > 10:
                 ress[i] = np.median(fs[i, sel] - conts[sel])
@@ -747,7 +654,26 @@ def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_wh
     return ress
 
 
-def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas, coeffs, betas, ress):
+def plot_continuum_params(
+    outpdf,
+    nplot,
+    numproc,
+    s,
+    zs,
+    ws,
+    fs,
+    ivs,
+    phot_bands,
+    weffs,
+    wmins,
+    wmaxs,
+    phot_fs,
+    phot_ivs,
+    islyas,
+    coeffs,
+    betas,
+    ress,
+):
     """
     Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
 
@@ -784,7 +710,9 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
         ii = np.arange(len(s))
     else:
         ii = np.random.choice(len(s), size=nplot, replace=False)
-    outpngs = np.array([os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in range(len(s))])
+    outpngs = np.array(
+        [os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in range(len(s))]
+    )
     titles = [
         "TARGETID = {} (input_z = {:.2f})".format(tid, z)
         for tid, z in zip(s["TARGETID"], zs)
@@ -794,11 +722,25 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
     myargs = [
         (
             outpngs[i],
-            s[i], zs[i], ws, fs[i], ivs[i],
-            phot_bands, weffs[i], wmins[i], wmaxs[i], phot_fs[i], phot_ivs[i], islyas[i],
-            coeffs[i], betas[i], ress[i],
-            titles[i], txtss[i],
-        ) for i in ii
+            s[i],
+            zs[i],
+            ws,
+            fs[i],
+            ivs[i],
+            phot_bands,
+            weffs[i],
+            wmins[i],
+            wmaxs[i],
+            phot_fs[i],
+            phot_ivs[i],
+            islyas[i],
+            coeffs[i],
+            betas[i],
+            ress[i],
+            titles[i],
+            txtss[i],
+        )
+        for i in ii
     ]
     start = time()
     log.info(
@@ -809,7 +751,11 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
     pool = multiprocessing.Pool(numproc)
     with pool:
         ds = pool.starmap(plot_continuum_params_indiv, myargs)
-    log.info("plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
+    log.info(
+        "plot_continuum_params_indiv() on {} spectra done (took {:.1f}s)".format(
+            len(myargs), time() - start
+        )
+    )
 
     start = time()
     os.system("convert {} {}".format(" ".join(outpngs[ii]), outpdf))
@@ -821,10 +767,23 @@ def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands
 
 def plot_continuum_params_indiv(
     outpng,
-    s, z, ws, fs_i, ivs_i,
-    phot_bands, weffs_i, wmins_i, wmaxs_i, phot_fs_i, phot_ivs_i, islyas_i,
-    coeff, beta, res,
-    title, txts
+    s,
+    z,
+    ws,
+    fs_i,
+    ivs_i,
+    phot_bands,
+    weffs_i,
+    wmins_i,
+    wmaxs_i,
+    phot_fs_i,
+    phot_ivs_i,
+    islyas_i,
+    coeff,
+    beta,
+    res,
+    title,
+    txts,
 ):
     """
     Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
@@ -855,8 +814,21 @@ def plot_continuum_params_indiv(
 
     fig, ax = plt.subplots()
     smf, _ = get_smooth(fs_i, ivs_i, 5)
-    ax.scatter(weffs_i[~islyas_i], phot_fs_i[~islyas_i], c="g", zorder=2, label="Tractor photometry (used)")
-    ax.scatter(weffs_i[islyas_i], phot_fs_i[islyas_i], marker="x", c="r", zorder=2, label="Tractor photometry (not used)")
+    ax.scatter(
+        weffs_i[~islyas_i],
+        phot_fs_i[~islyas_i],
+        c="g",
+        zorder=2,
+        label="Tractor photometry (used)",
+    )
+    ax.scatter(
+        weffs_i[islyas_i],
+        phot_fs_i[islyas_i],
+        marker="x",
+        c="r",
+        zorder=2,
+        label="Tractor photometry (not used)",
+    )
     y, dy = -0.05, -0.015
     ii = weffs_i.argsort()
     for band, weff, wmin, wmax, islya in zip(
@@ -871,12 +843,22 @@ def plot_continuum_params_indiv(
             ax.text(weff, y, band, color=col, ha="center", va="center")
         y += dy
     sel = (np.isfinite(phot_ivs_i)) & (phot_ivs_i != 0)
-    ax.errorbar(weffs_i[sel], phot_fs_i[sel], 1./np.sqrt(phot_ivs_i[sel]) ,color="none", ecolor="g", elinewidth=5, zorder=2)
+    ax.errorbar(
+        weffs_i[sel],
+        phot_fs_i[sel],
+        1.0 / np.sqrt(phot_ivs_i[sel]),
+        color="none",
+        ecolor="g",
+        elinewidth=5,
+        zorder=2,
+    )
     conts = get_cont_powerlaw(ws, z, coeff, beta)
     ax.plot(ws, conts, zorder=3, label="Model Power Law")
     ax.plot(ws, smf, lw=0.5, zorder=1, label="DESI spectrum")
     sel = (ws / (1 + z) > 1300) & (ws / (1 + z) < 1900)
-    ax.plot(ws[sel], ws[sel]*0+0.2, color="k", lw=3, alpha=0.5, label="Region for norm.")
+    ax.plot(
+        ws[sel], ws[sel] * 0 + 0.2, color="k", lw=3, alpha=0.5, label="Region for norm."
+    )
     ax.plot(ws, conts + res, lw=1, zorder=3, color="k", label="Renorm. model Power Law")
     wcen = 1215.7 * (1 + z)
     ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
@@ -884,15 +866,30 @@ def plot_continuum_params_indiv(
     if ~np.isfinite(coeff):
         ax.text(0.5, 0.95, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.95, "Cont. power-law coeff={:.2f}".format(coeff), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.95,
+            "Cont. power-law coeff={:.2f}".format(coeff),
+            transform=ax.transAxes,
+        )
     if ~np.isfinite(beta):
         ax.text(0.5, 0.90, "Cont. power-law beta=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.90, "Cont. power-law beta={:.2f}".format(beta), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.90,
+            "Cont. power-law beta={:.2f}".format(beta),
+            transform=ax.transAxes,
+        )
     if ~np.isfinite(res):
         ax.text(0.5, 0.85, "Cont. power-law res=np.nan", transform=ax.transAxes)
     else:
-        ax.text(0.5, 0.85, "(Cont. - spectrum) res.={:.3f}".format(res), transform=ax.transAxes)
+        ax.text(
+            0.5,
+            0.85,
+            "(Cont. - spectrum) res.={:.3f}".format(res),
+            transform=ax.transAxes,
+        )
     x, y, dy = 0.5, 0.80, -0.05
     if txts is not None:
         for txt in txts:
@@ -932,512 +929,53 @@ def wrapper_continuum_params_indiv(outpng, fn, tid, zkey, title, txts):
 
     ii = np.where(s["TARGETID"] == tid)[0]
     if ii.size == 0:
-        log.warning("no match for TARGETID={} in {}; no {} generated".format(tid, fn, outpng))
+        log.warning(
+            "no match for TARGETID={} in {}; no {} generated".format(tid, fn, outpng)
+        )
         return None
     if ii.size > 1:
-        log.warning("{} matches found for TARGETID={} in {}; pick the first occurence".format(tid, fn))
+        log.warning(
+            "{} matches found for TARGETID={} in {}; pick the first occurence".format(
+                tid, fn
+            )
+        )
     i = ii[0]
 
-    phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+    phot_bands = [
+        _.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"
+    ]
     phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
 
-    coeff, beta, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs = get_continuum_params_indiv(s[i], p[i], s[zkey][i], phot_bands)
+    (
+        coeff,
+        beta,
+        weffs,
+        wmins,
+        wmaxs,
+        islyas,
+        phot_fs,
+        phot_ivs,
+    ) = get_continuum_params_indiv(s[i], p[i], s[zkey][i], phot_bands)
 
     res = get_continuum_params_ress(coeff, beta, ws, fs[i], ivs[i], s[zkey][i])
 
     plot_continuum_params_indiv(
         outpng,
-        s[i], s[zkey][i], ws, fs[i], ivs[i],
-        phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas,
-        coeff, beta, res,
-        title, txts
+        s[i],
+        s[zkey][i],
+        ws,
+        fs[i],
+        ivs[i],
+        phot_bands,
+        weffs,
+        wmins,
+        wmaxs,
+        phot_fs,
+        phot_ivs,
+        islyas,
+        coeff,
+        beta,
+        res,
+        title,
+        txts,
     )
-
-
-def get_zelda_geometry_dict():
-
-    return {
-        "ts": "Thin_Shell",
-        "gw": "Galactic_Wind",
-        "bxsi": "Bicone_X_Slab_In",
-        "bxso": "Bicone_X_Slab_Out",
-        "tsc": "Thin_Shell_Cont",
-    }
-
-
-def get_default_zelda_dirs():
-
-    zelda_dir = os.path.join(
-        os.getenv("DESI_ROOT"), "users", "raichoor", "laelbg", "zelda"
-    )
-    zelda_grids_dir = os.path.join(zelda_dir, "grids/")  # need the trailing "/" !
-    zelda_dnn_dir = os.path.join(zelda_dir, "sklearn-1.4.2")
-
-    return zelda_dir, zelda_grids_dir, zelda_dnn_dir
-
-
-def get_zelda_init_table(n):
-
-    d = Table()
-    d["FIT"] = np.zeros(n, dtype=bool)
-    for key in [
-        "Z",
-        "ZLO",
-        "ZHI",
-        "LYAPEAK_Z",
-        "RCHI2",
-        "LYAPEAK_PNR",
-        "LYAFLUX",
-        "LYAEW",
-    ]:
-        if key == "ZHI":
-            d[key] = +99.0
-        else:
-            d[key] = -99.0
-
-    return d
-
-
-# zelda: get desi fwhm value
-# R = lambda / (1+z) / fwhm
-# eyeballing fig. 33 of desi+22...
-def get_zelda_desi_spectro_fwhm(wave, z):
-    if (wave < 3600) | (wave > 9800):
-        return None
-    if (wave >= 3600) & (wave < 5790):
-        x0, y0, x1, y1 = 3560, 2023, 5973, 3465
-    elif (wave >= 5790) & (wave < 7570):
-        x0, y0, x1, y1 = 5560, 3372, 7802, 4877
-    else:
-        x0, y0, x1, y1 = 7367, 3829, 9893, 5239
-    sl = (y1 - y0) / (x1 - x0)
-    zp = y0 - sl * x0
-    res = sl * wave + zp
-    return wave / res / (1 + z)
-
-
-# zelda: to rescale output model
-def get_zelda_rescale(fs, ivs, mod_fs):
-    sls = np.logspace(0, 10, 1000)
-    n = sls.size
-    chi2s = np.array([((fs - mod_fs * sl) ** 2 * ivs).sum() for sl in sls])
-    i = chi2s.argmin()
-    return sls[i]
-
-
-def zelda_make_plot(
-    outpng,
-    zelda_model,
-    zelda_geometry,
-    ws,
-    fs,
-    ivs,
-    z,
-    z_peak,
-    zelda_z50,
-    zelda_z16,
-    zelda_z84,
-    zelda_fs50,
-    zelda_fs16,
-    zelda_fs84,
-    rchi2,
-    PNR_t,
-    title,
-):
-
-    geometry_dict = get_zelda_geometry_dict()
-
-    # flux error
-    efs = 1e99 + np.zeros(len(fs))
-    sel = ivs > 0
-    efs[sel] = 1.0 / np.sqrt(ivs[sel])
-
-    fig, ax = plt.subplots()
-
-    ax.plot(ws, fs, color="b", label="data")
-    ax.fill_between(ws, fs - efs, fs + efs, color="b", alpha=0.25)
-
-    cont = np.median(fs[ivs > 0])
-    ax.axhline(cont, ls="--", color="b", label="data continuum")
-
-    ax.plot(ws, zelda_fs50, color="orange", label="zelda fit")
-    ax.fill_between(ws, zelda_fs16, zelda_fs84, color="orange", alpha=0.25)
-
-    ax.axvline(
-        wave_lya * (1 + z_peak),
-        ls="--",
-        color="g",
-        label="lyapeak_z={:.4f}".format(z_peak),
-    )
-    ax.axvline(wave_lya * (1 + z), ls="--", color="c", label="input_z={:.4f}".format(z))
-    ax.axvline(
-        wave_lya * (1 + zelda_z50),
-        ls="--",
-        color="r",
-        label="zelda_z={:.4f}".format(zelda_z50),
-    )
-    ax.axvspan(
-        wave_lya * (1 + zelda_z16), wave_lya * (1 + zelda_z84), color="r", alpha=0.25
-    )
-    ax.legend(loc=2)
-
-    ax.set_title(title)
-    ax.set_xlabel("Observed wavelength [A]")
-    ax.set_ylabel("Flux density")
-    ax.set_xlim((wave_lya - 18.5) * (1 + z), (wave_lya + 18.5) * (1 + z))
-    ax.grid()
-    ax.set_ylim(-0.5, 6)
-    x0, x1, y, dy = 0.55, 0.85, 0.95, -0.05
-    for txt0, txt1 in [
-        ["model(zelda)", zelda_model.capitalize()],
-        ["geometry(zelda)", geometry_dict[zelda_geometry]],
-        ["obs_offset(zelda - input)", "{:.1f} A".format(wave_lya * (zelda_z50 - z))],
-        [
-            "rf_offset(zelda - input)",
-            "{:.1f} A".format(wave_lya * (zelda_z50 - z) / (1 + z)),
-        ],
-        ["rchi2", "{:.1f}".format(rchi2)],
-        ["SNR(peak)", "{:.1f}".format(PNR_t)],
-    ]:
-        ax.text(x0, y, txt0, fontsize=7, fontweight="bold", transform=ax.transAxes)
-        ax.text(x1, y, txt1, fontsize=7, fontweight="bold", transform=ax.transAxes)
-        y += dy
-
-    plt.savefig(outpng, bbox_inches="tight")
-    plt.close()
-
-
-# zelda: fit the lya line in a spectrum
-# - LyaRT_Grid, machine_data: global variables defined in get_zelda_fit()
-# - zelda_geometry: tsc only for now
-# - z: redshift
-# - ws, fs, ivs: spectrum (i.e. 1d arrays)
-# - gauss_smooth: smoothing? (None -> no smoothing)
-# - outpng: if not None, do a plot
-# fitting calling sequence based on https://zelda.readthedocs.io/en/latest/Tutorial_DNN.html
-# def get_zelda_fit_one_spectrum(LyaRT_Grid, machine_data, zelda_model, zelda_geometry, z, ws, fs, ivs, gauss_smooth, outpng, title):
-def get_zelda_fit_one_spectrum(
-    zelda_model, zelda_geometry, tid, z, ws, fs, ivs, gauss_smooth, outpng, title
-):
-
-    # log.info(outpng)
-
-    assert len(fs.shape) == 1
-    assert len(ivs.shape) == 1
-
-    # make copies
-    ws_copy, fs_copy, ivs_copy = ws.copy(), fs.copy(), ivs.copy()
-
-    # initialize table with non-valid values
-    d = get_zelda_init_table(1)
-
-    # zelda stuff
-    geometry_dict = get_zelda_geometry_dict()
-    machine = machine_data["Machine"]
-    w_rest_Arr = machine_data["w_rest"]
-
-    # take 18.5A on each side of the lya line; cf. zelda, sect. 3.1.1
-    # only fit if that range is fully included in ws
-    dofit = True
-    if not (z > 0):
-        dofit = False
-
-    if dofit:
-        wmin, wmax = (wave_lya - 18.5) * (1 + z), (wave_lya + 18.5) * (1 + z)
-        if (ws.min() > wmin) | (ws.max() < wmax):
-            dofit = False
-
-    # no fit? (i.e. z < 2, approximately)
-    if not dofit:
-        if outpng is not None:
-            fig, ax = plt.subplots()
-            ax.set_title(title)
-            plt.savefig(outpng, bbox_inches="tight")
-            plt.close()
-        return d
-
-    sel = (ws > wmin) & (ws < wmax)
-    ws, fs, ivs = ws[sel], fs[sel], ivs[sel]
-
-    # smoothing?
-    if gauss_smooth is not None:
-        fs, ivs = get_smooth(fs, ivs, gauss_smooth)
-
-    # we will remove the continuum for the fitting (even we use the tsc model)
-    cont = np.median(fs[ivs > 0])
-
-    # flux error
-    efs = 1e99 + np.zeros(len(fs))
-    sel = ivs > 0
-    efs[sel] = 1.0 / np.sqrt(ivs[sel])
-
-    # PNR: peak-to-noise ratio
-    # assumes the peak is within 3A (rf) from 1215.67
-    i = fs.argmax()
-    z_peak = ws[i] / wave_lya - 1.0
-    PIX_t = (ws[1] - ws[0]) / (1 + z)
-    FWHM_t = get_zelda_desi_spectro_fwhm(ws[i], z)
-    PNR_t = fs[i] / efs[i]
-    wc = ws[i] / (1 + z)
-    wlo, whi = (wc - 3) * (1 + z), (wc + 3) * (1 + z)
-    sel = (ws > wlo) & (ws < whi)
-    F_t = np.trapz(fs[sel] - cont, x=ws[sel])
-
-    # fit with zelda
-    # use spectrum with continuum removed
-    # use 100 iterations
-    try:
-        (
-            Sol,
-            z_sol,
-            log_V_Arr,
-            log_N_Arr,
-            log_t_Arr,
-            z_Arr,
-            log_E_Arr,
-            log_W_Arr,
-        ) = zelda.NN_measure(
-            ws, fs - cont, efs, FWHM_t, PIX_t, machine, w_rest_Arr, N_iter=100
-        )
-    except IndexError:
-        log.warning("zelda.NN_measure() failed for TARGETID={}, Z={}".format(tid, z))
-        if outpng is not None:
-            fig, ax = plt.subplots()
-            ax.set_title(title)
-            plt.savefig(outpng, bbox_inches="tight")
-            plt.close()
-        return d
-
-    mod = {}
-    PNR = 100000.0  # let's put infinite signal to noise in the model line
-
-    # record the median and (16, 84) interval
-    for perc in [16, 50, 84]:
-
-        mod["z_{}".format(perc)] = np.percentile(z_Arr, perc)
-        #
-        V = 10 ** np.percentile(log_V_Arr, perc)
-        log_N = np.percentile(log_N_Arr, perc)
-        t = 10 ** np.percentile(log_t_Arr, perc)
-        log_E = np.percentile(log_E_Arr, perc)
-        W = 10 ** np.percentile(log_W_Arr, perc)
-
-        # creates the line
-        if (mod["z_{}".format(perc)] < 0) | (mod["z_{}".format(perc)] > 10):
-            mod["flux_{}".format(perc)] = np.nan + fs
-            continue
-
-        ws_perc, fs_perc, _ = zelda.Generate_a_real_line(
-            mod["z_{}".format(perc)],
-            V,
-            log_N,
-            t,
-            F_t,
-            log_E,
-            W,
-            PNR,
-            FWHM_t,
-            PIX_t,
-            LyaRT_Grid,
-            geometry_dict[zelda_geometry],
-        )
-
-        # Get cooler profiles
-        (
-            mod["wave_{}".format(perc)],
-            mod["flux_{}".format(perc)],
-        ) = zelda.plot_a_rebinned_line(ws_perc, fs_perc, PIX_t)
-        sel = (mod["wave_{}".format(perc)] >= ws.min()) & (
-            mod["wave_{}".format(perc)] <= ws.max()
-        )
-        if sel.sum() == 0:
-            mod["flux_{}".format(perc)] = np.nan + fs
-        else:
-            mod["wave_{}".format(perc)] = mod["wave_{}".format(perc)][sel]
-            mod["flux_{}".format(perc)] = mod["flux_{}".format(perc)][sel]
-            mod["flux_{}".format(perc)] = np.interp(
-                ws,
-                mod["wave_{}".format(perc)],
-                mod["flux_{}".format(perc)],
-            )
-            # k = f_pix_One_Arr.argmax()
-            # f_pix_One_Arr /= f_pix_One_Arr[k] / fs[j]
-
-    # rescale the output model
-    sl = get_zelda_rescale(fs - cont, efs, mod["flux_50"])
-    for perc in [16, 50, 84]:
-        mod["flux_{}".format(perc)] = cont + sl * mod["flux_{}".format(perc)]
-
-    # rchi2
-    rchi2 = np.dot((fs - mod["flux_50"]) ** 2, ivs) / fs.size
-
-    # lya flux
-    lya_flux = np.trapz(mod["flux_50"] - cont, x=ws)
-
-    # lya ew
-    # https://github.com/desihub/fastspecfit/blob/2827be47fb46846de43dd167ceb9426387e82631/py/fastspecfit/emlines.py#L944
-    lya_ew = lya_flux / cont / (1.0 + mod["z_50"])  # rest frame [A]
-
-    # plot?
-    if outpng is not None:
-        zelda_make_plot(
-            outpng,
-            zelda_model,
-            zelda_geometry,
-            ws,
-            fs,
-            ivs,
-            z,
-            z_peak,
-            mod["z_50"],
-            mod["z_16"],
-            mod["z_84"],
-            mod["flux_50"],
-            mod["flux_16"],
-            mod["flux_84"],
-            rchi2,
-            PNR_t,
-            title,
-        )
-
-    # fill table with outputs
-    d["FIT"] = [True]
-    d["Z"], d["ZLO"], d["ZHI"] = [mod["z_50"]], [mod["z_16"]], [mod["z_84"]]
-    d["LYAPEAK_Z"] = [z_peak]
-    d["RCHI2"], d["LYAPEAK_PNR"] = [rchi2], [PNR_t]
-    d["LYAFLUX"], d["LYAEW"] = [lya_flux], [lya_ew]
-
-    # restore copies
-    ws, fs, ivs = ws_copy, fs_copy, ivs_copy
-
-    return d
-
-
-# zs : redshifts (1d array)
-# fss, ivss : fluxes and ivars (2d arrays)
-# gauss_smooth : smooth? (None -> no smoothing)
-# outpdf, nplot : None -> no plotting; pick nplot random spectra
-def get_zelda_fit(
-    zelda_grids_dir,
-    zelda_dnn_dir,
-    zelda_model,
-    zelda_geometry,
-    tids,
-    zs,
-    ws,
-    fss,
-    ivss,
-    gauss_smooth,
-    outpdf,
-    nplot,
-    numproc,
-):
-
-    assert len(zs.shape) == 1
-    assert len(ws.shape) == 1
-    assert len(fss.shape) == 2
-    assert ivss.shape == fss.shape
-    assert fss.shape[0] == tids.size
-    assert zs.size == tids.size
-    assert fss.shape[1] == ws.size
-
-    # zelda stuff
-    global LyaRT_Grid
-    global machine_data
-    geometry_dict = get_zelda_geometry_dict()
-    zelda.funcs.Data_location = zelda_grids_dir
-    LyaRT_Grid = zelda.load_Grid_Line(geometry_dict[zelda_geometry])
-    fn = os.path.join(
-        zelda_dnn_dir, "{}_{}_dnn.sav".format(zelda_model, zelda_geometry)
-    )
-    machine_data = pickle.load(open(fn, "rb"))
-
-    #
-    outpngs = np.array([None for _ in zs])
-    titles = np.array([None for _ in zs])
-
-    if outpdf is not None:
-
-        tmpdir = tempfile.mkdtemp()
-        np.random.seed(1234)
-        if len(tids) < nplot:
-            ii = np.arange(len(tids))
-        else:
-            ii = np.random.choice(len(tids), size=nplot, replace=False)
-        outpngs[ii] = [os.path.join(tmpdir, "tmp-{:08d}.png".format(i)) for i in ii]
-        titles[ii] = ["TARGETID = {}".format(tid) for tid in tids[ii]]
-
-    # launch multiprocessing
-    myargs = []
-    for i in range(len(zs)):
-        myargs.append(
-            (
-                # LyaRT_Grid,
-                # machine_data,
-                zelda_model,
-                zelda_geometry,
-                tids[i],
-                zs[i],
-                ws,
-                fss[i],
-                ivss[i],
-                gauss_smooth,
-                outpngs[i],
-                titles[i],
-            )
-        )
-
-    start = time()
-    log.info(
-        "launch pool for {} calls of get_zelda_fit_one_spectrum() with {} processors".format(
-            len(myargs), numproc
-        )
-    )
-    pool = multiprocessing.Pool(numproc)
-    with pool:
-        ds = pool.starmap(get_zelda_fit_one_spectrum, myargs)
-    log.info("get_zelda_fit_one_spectrum() on {} spectra done (took {:.1f}s)".format(len(myargs), time() - start))
-
-    d = vstack(ds)
-
-    if outpdf is not None:
-        os.system("convert {} {}".format(" ".join(outpngs[ii]), outpdf))
-        for outpng in outpngs:
-            if outpng is not None:
-                os.remove(outpng)
-
-    return d
-
-
-
-def get_cnnkeys():
-
-    keys = [
-        "Z",
-        "CL",
-    ]
-
-    return keys
-
-def get_cnn(tids, cnnfn):
-
-    d = Table()
-    d["CL"] = -99. + np.zeros(len(tids))
-    d["Z"] = -99.
-
-    # read the cnn file
-    c = Table(fitsio.read(cnnfn))
-    ii, iic = match(tids, c["TARGETID"])
-    log.info("{}/{} TARGETIDs are in {}".format(ii.size, len(d), cnnfn))
-    d["CL"][ii] = c["CL_cnn"][iic]
-
-    # now read the redrock files
-    pattern = os.path.join(os.path.dirname(cnnfn), "redrock-*.fits")
-    fns = sorted(glob(pattern))
-    log.info("found {} {} files".format(len(fns), pattern))
-    rr = vstack([Table(fitsio.read(fn, "REDSHIFTS")) for fn in fns])
-    ii, iirr = match(tids, rr["TARGETID"])
-    log.info("{}/{} TARGETIDs are in the {} {} files".format(ii.size, len(d), len(fns), pattern))
-    d["Z"][ii] = rr["Z"][iirr]
-
-    return d
