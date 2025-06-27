@@ -8,6 +8,7 @@ from glob import glob
 import multiprocessing
 import fitsio
 import numpy as np
+from astropy.io import fits
 from astropy.table import Table, vstack
 from astropy import units as u
 from scipy.optimize import curve_fit
@@ -36,7 +37,7 @@ allowed_zelda_geometries = ["tsc"]
 
 igm = None
 igm_at_z = None
-
+all_filts = None
 
 def get_rrkeys():
 
@@ -141,6 +142,10 @@ def get_igm_inoue14(z, ws, zrounding=3):
     # AR value at z
     # AR force ws to be float (https://github.com/desihub/fastspecfit/issues/230)
     global igm_at_z
+    if igm_at_z is None:
+        igm_at_z = {}
+        igm_at_z["wave"] = get_igm_ref_ws()
+
     zround_str = "{0:.{1}f}".format(z, zrounding)
     if zround_str not in igm_at_z:
         log.info("compute igm.full_IGM() for zround_str={}".format(zround_str))
@@ -430,6 +435,11 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
 
     nband = len(phot_bands)
 
+    # AR all filter speclite curves
+    global all_filts
+    if all_filts is None:
+        all_filts = get_speclite_all_filts()
+
     # AR first grab the photometry totalflux -> fiberflux factor
     # AR fiberflux columns will be there for tractor-based catalogs
     # AR if no fiberflux columns (or valid values), we assume a psf profile
@@ -594,9 +604,10 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
 
     nrow = len(p)
 
-    # AR
+    # AR all filter speclite curves
     global all_filts
-    all_filts = get_speclite_all_filts()
+    if all_filts is None:
+        all_filts = get_speclite_all_filts()
 
     # AR first build the Inoue14 grid
     build_igm_inoue14_zgrid(zs, numproc)
@@ -639,6 +650,101 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
     phot_ivs = np.vstack([out[7] for out in outs])
 
     return coeffs, betas, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+
+
+def get_continuum_params_ress_default_wlohi():
+    """
+    Get the default rest-frame wavelength range used in get_continuum_params_ress().
+
+    Returns:
+        rf_wlo 1300: the min. rest-frame wavelength to consider to compute the residuals (int)
+        rf_whi = 1900: the max. rest-frame wavelength to consider to compute the residuals (int)
+    """
+
+    return 1300, 1900
+
+
+def get_continuum_params_ress(coeffs, betas, ws, fs, ivs, zs, rf_wlo=None, rf_whi=None):
+    """
+    Compute the "residuals" of get_continuum_params() w.r.t. the spec. fluxes.
+
+    Args:
+        coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
+        betas: the slopes (np.array of floats)
+        zs: redshifts (np.array of floats)
+        ws: the DESI wavelengths (in A) (np.array of floats)
+        fs: the DESI fluxes (in 1e-17 erg/s/cm2/A) (np.array of floats)
+        ivs: the DESI inverse-variances (np.array of floats)
+        rf_wlo (optional, defaults to 1300): the min. rest-frame wavelength to consider to compute the residuals (int)
+        rf_whi (optional, defaults to 1900): the max. rest-frame wavelength to consider to compute the residuals (int)
+
+    Returns:
+        ress: the residuals, ie median(spec_flux - phot_cont).
+
+    Notes:
+        coeffs, betas, zs have shape = (Nrow).
+        ws has shape = (Nwave).
+        fs, ivs have shape = (Nrow, Nwave).
+        We set ress=np.nan for rows where, z or coeff or beta are np.nan.
+    """
+
+    if rf_wlo is None:
+        rf_wlo = get_continuum_params_ress_default_wlohi()[0]
+    if rf_whi is None:
+        rf_whi = get_continuum_params_ress_default_wlohi()[1]
+
+    # AR scalar or array?
+    if hasattr(coeffs, "__len__"):
+        is_scalar = False
+        assert hasattr(betas, "__len__")
+        assert len(fs.shape) == 2
+        assert len(ivs.shape) == 2
+        assert hasattr(zs,  "__len__")
+        nrow, nwave = fs.shape
+        assert ws.shape[0] == nwave
+        assert ivs.shape == (nrow, nwave)
+        assert len(coeffs) == nrow
+        assert len(betas) == nrow
+    else:
+        is_scalar = True
+        assert not hasattr(betas, "__len__")
+        assert len(fs.shape) == 1
+        assert len(ivs.shape) == 1
+        nwave = len(ws)
+        assert len(fs) == nwave
+        assert len(ivs) == nwave
+
+    if is_scalar:
+        res = np.nan
+        ok = (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas))
+        if (np.isfinite(zs)) & (np.isfinite(coeffs)) & (np.isfinite(betas)):
+            conts = get_cont_powerlaw(
+                ws,
+                zs,
+                coeffs,
+                betas
+            )
+            sel = (ws / (1 + zs) > rf_wlo) & (ws / (1 + zs) < rf_whi)
+            if sel.sum() > 10:
+                ress = np.median(fs[sel] - conts[sel])
+    else:
+        sel = np.isfinite(zs)
+        sel &= np.isfinite(coeffs)
+        sel &= np.isfinite(betas)
+        ii = np.where(sel)[0]
+        ress = np.nan + np.zeros(len(zs))
+        for i in ii:
+            conts = get_cont_powerlaw(
+                ws,
+                zs[i],
+                coeffs[i],
+                betas[i]
+            )
+            sel = (ws / (1 + zs[i]) > rf_wlo) & (ws / (1 + zs[i]) < rf_whi)
+            if sel.sum() > 10:
+                ress[i] = np.median(fs[i, sel] - conts[sel])
+
+    return ress
 
 
 def plot_continuum_params(outpdf, nplot, numproc, s, zs, ws, fs, ivs, phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas, coeffs, betas, ress):
@@ -775,23 +881,23 @@ def plot_continuum_params_indiv(
     wcen = 1215.7 * (1 + z)
     ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
     ax.set_title(title)
-    x, y, dy = 0.5, 0.95, -0.05
+    if ~np.isfinite(coeff):
+        ax.text(0.5, 0.95, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.95, "Cont. power-law coeff={:.2f}".format(coeff), transform=ax.transAxes)
+    if ~np.isfinite(beta):
+        ax.text(0.5, 0.90, "Cont. power-law beta=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.90, "Cont. power-law beta={:.2f}".format(beta), transform=ax.transAxes)
+    if ~np.isfinite(res):
+        ax.text(0.5, 0.85, "Cont. power-law res=np.nan", transform=ax.transAxes)
+    else:
+        ax.text(0.5, 0.85, "(Cont. - spectrum) res.={:.3f}".format(res), transform=ax.transAxes)
+    x, y, dy = 0.5, 0.80, -0.05
     if txts is not None:
         for txt in txts:
             ax.text(x, y, txt, transform=ax.transAxes)
             y += dy
-    if ~np.isfinite(coeff):
-        ax.text(0.5, 0.70, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(0.5, 0.70, "Cont. power-law coeff={:.2f}".format(coeff), transform=ax.transAxes)
-    if ~np.isfinite(beta):
-        ax.text(0.5, 0.65, "Cont. power-law beta=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(0.5, 0.65, "Cont. power-law coeff={:.2f}".format(beta), transform=ax.transAxes)
-    if ~np.isfinite(res):
-        ax.text(0.5, 0.60, "Cont. power-law res=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(0.5, 0.60, "(Cont. - spectrum) res.={:.3f}".format(res), transform=ax.transAxes)
     ax.grid()
     ax.set_axisbelow(True)
     ax.set_xlim(3600, 9800)
@@ -801,6 +907,51 @@ def plot_continuum_params_indiv(
     ax.legend(loc=2, fontsize=8)
     plt.savefig(outpng, bbox_inches="tight")
     plt.close()
+
+
+def wrapper_continuum_params_indiv(outpng, fn, tid, zkey, title, txts):
+    """
+    Conveniency wrapper function to fit + plot the continuum for a target.
+
+    Args:
+        outpng: output png file (str)
+        fn: full path to a desi-{img}.fits file (str)
+        tid: TARGETID (int)
+        zkey: the redshift key to use in the SPECINFO extension of fn (str)
+        title: title for the plot (str)
+        txts: list of texts to print (could be set to None) (list of strs)
+    """
+
+    h = fits.open(fn)
+    s = Table(h["SPECINFO"].data)
+    if "PHOTV2INFO" in h:
+        p = Table(h["PHOTV2INFO"].data)
+    else:
+        p = Table(h["PHOTINFO"].data)
+    ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
+
+    ii = np.where(s["TARGETID"] == tid)[0]
+    if ii.size == 0:
+        log.warning("no match for TARGETID={} in {}; no {} generated".format(tid, fn, outpng))
+        return None
+    if ii.size > 1:
+        log.warning("{} matches found for TARGETID={} in {}; pick the first occurence".format(tid, fn))
+    i = ii[0]
+
+    phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+    phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
+
+    coeff, beta, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs = get_continuum_params_indiv(s[i], p[i], s[zkey][i], phot_bands)
+
+    res = get_continuum_params_ress(coeff, beta, ws, fs[i], ivs[i], s[zkey][i])
+
+    plot_continuum_params_indiv(
+        outpng,
+        s[i], s[zkey][i], ws, fs[i], ivs[i],
+        phot_bands, weffs, wmins, wmaxs, phot_fs, phot_ivs, islyas,
+        coeff, beta, res,
+        title, txts
+    )
 
 
 def get_zelda_geometry_dict():

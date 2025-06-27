@@ -11,8 +11,9 @@ from desihiz.extras_utils import (
     allowed_extras,
     get_rr,
     get_rrkeys,
+    get_continuum_params_ress_default_wlohi,
     get_continuum_params,
-    get_cont_powerlaw,
+    get_continuum_params_ress,
     plot_continuum_params,
     get_default_zelda_dirs,
     get_zelda_fit,
@@ -122,6 +123,9 @@ def main():
             p = Table(h["PHOTV2INFO"].data)
         else:
             p = Table(h["PHOTINFO"].data)
+
+        ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
+
         # photometric bands (for the continuum estimation)
         phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
         phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
@@ -139,10 +143,12 @@ def main():
             # column names
             coeffkey = "{}_CONT_PL_COEFF".format(zkey)
             betakey = "{}_CONT_PL_BETA".format(zkey)
-            reskey = "{}_CONT_RES_1300_1900".format(zkey)
+            res_rf_wlo, res_rf_whi = get_continuum_params_ress_default_wlohi()
+            reskey = "{}_CONT_RES_{}_{}".format(zkey, res_rf_wlo, res_rf_whi)
 
             # initialize
-            s["{}_CONT".format(zkey)], s[coeffkey], s[betakey] = False, np.nan, np.nan
+            s["{}_CONT".format(zkey)] = False
+            s[coeffkey], s[betakey], s[reskey] = np.nan, np.nan, np.nan
             weffs = np.nan + np.zeros((nrow, nband))
             wmins = np.nan + np.zeros((nrow, nband))
             wmaxs = np.nan + np.zeros((nrow, nband))
@@ -155,27 +161,7 @@ def main():
             ii = np.where(zs > 2)[0]
             if ii.size > 0:
                 s[coeffkey][ii], s[betakey][ii], weffs[ii], wmins[ii], wmaxs[ii], islyas[ii], phot_fs[ii], phot_ivs[ii] = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
-
-            # successful fits
-            sel = np.isfinite(zs)
-            sel &= np.isfinite(s[coeffkey])
-            sel &= np.isfinite(s[betakey])
-            ii = np.where(sel)[0]
-            s["{}_CONT".format(zkey)][ii] = True
-
-            # estimate the offset between 1300-1900A
-            ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
-            s[reskey] = np.nan
-            for i in ii:
-                conts = get_cont_powerlaw(
-                    ws,
-                    zs[i],
-                    s[coeffkey][i],
-                    s[betakey][i]
-                )
-                sel = (ws / (1 + zs[i]) > 1300) & (ws / (1 + zs[i]) < 1900)
-                if sel.sum() > 10:
-                    s[reskey][i] = np.median(fs[i, sel] - conts[sel])
+                s[reskey][ii] = get_continuum_params_ress(s[coeffkey][ii], s[betakey][ii], ws, fs[ii], ivs[ii], zs[ii])
 
             # plot
             outpdf = args.mergefn.replace(".fits", "-photcont-{}.pdf".format(zkey.lower()))
