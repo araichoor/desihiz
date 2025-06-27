@@ -11,6 +11,10 @@ from desihiz.extras_utils import (
     allowed_extras,
     get_rr,
     get_rrkeys,
+    get_continuum_params_ress_default_wlohi,
+    get_continuum_params,
+    get_continuum_params_ress,
+    plot_continuum_params,
     get_default_zelda_dirs,
     get_zelda_fit,
     get_cnn,
@@ -107,6 +111,86 @@ def main():
 
         i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
         h[i] = myh
+
+
+    # cont
+    if "cont" in args.extras.split(","):
+
+        s = Table(h[ext].data)
+        nrow = len(s)
+
+        if "PHOTV2INFO" in h:
+            p = Table(h["PHOTV2INFO"].data)
+        else:
+            p = Table(h["PHOTINFO"].data)
+
+        ws, fs, ivs = h["BRZ_WAVE"].data, h["BRZ_FLUX"].data, h["BRZ_IVAR"].data
+
+        # photometric bands (for the continuum estimation)
+        phot_bands = [_.replace("FLUX_IVAR_", "") for _ in p.colnames if _[:10] == "FLUX_IVAR_"]
+        phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
+        nband = len(phot_bands)
+
+        zkeys = ["RR_Z0", "RR_Z1", "VI_Z"]
+
+        for zkey in zkeys:
+
+            if zkey in ["RR_Z0", "RR_Z1"]:
+                zs = s["RR_ALL_Z"][:, int(zkey[-1])]
+            else:
+                zs = s[zkey]
+
+            # column names
+            coeffkey = "{}_CONT_PL_COEFF".format(zkey)
+            betakey = "{}_CONT_PL_BETA".format(zkey)
+            res_rf_wlo, res_rf_whi = get_continuum_params_ress_default_wlohi()
+            reskey = "{}_CONT_RES_{}_{}".format(zkey, res_rf_wlo, res_rf_whi)
+
+            # initialize
+            s["{}_CONT".format(zkey)] = False
+            s[coeffkey], s[betakey], s[reskey] = np.nan, np.nan, np.nan
+            weffs = np.nan + np.zeros((nrow, nband))
+            wmins = np.nan + np.zeros((nrow, nband))
+            wmaxs = np.nan + np.zeros((nrow, nband))
+            islyas = np.zeros((nrow, nband), dtype=bool)
+            phot_fs = np.nan + np.zeros((nrow, nband))
+            phot_ivs = np.nan + np.zeros((nrow, nband))
+
+            # get continuum params (coeff * lambda ** beta)
+            # only consider z > 2 rows, as we use the IGM in the process
+            ii = np.where(zs > 2)[0]
+            if ii.size > 0:
+                s[coeffkey][ii], s[betakey][ii], weffs[ii], wmins[ii], wmaxs[ii], islyas[ii], phot_fs[ii], phot_ivs[ii] = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
+                s[reskey][ii] = get_continuum_params_ress(s[coeffkey][ii], s[betakey][ii], ws, fs[ii], ivs[ii], zs[ii])
+
+            # plot
+            outpdf = args.mergefn.replace(".fits", "-photcont-{}.pdf".format(zkey.lower()))
+            log.info(outpdf)
+
+            nplot = 1000 # pick random nplot spectra
+            np.random.seed(1234)
+            if ii.size < nplot:
+                jj = ii
+            else:
+                jj = np.random.choice(ii, size=nplot, replace=False)
+            plot_continuum_params(
+                outpdf, nplot, args.numproc,
+                s[ii], zs[ii],
+                ws, fs[ii], ivs[ii],
+                phot_bands, weffs[ii], wmins[ii], wmaxs[ii], phot_fs[ii], phot_ivs[ii], islyas[ii],
+                s[coeffkey][ii], s[betakey][ii], s[reskey][ii],
+            )
+
+
+        # swap the extension
+        myh = fits.convenience.table_to_hdu(s)
+        for key in h[ext].header:
+            if key not in myh.header:
+                myh.header[key] = h[ext].header[key]
+
+        i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
+        h[i] = myh
+
 
     # zelda
     if "zelda" in args.extras.split(","):
