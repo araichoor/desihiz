@@ -10,6 +10,7 @@ from desiutil.redirect import stdouterr_redirected
 from desihiz.extras_rr_cnn import (
     get_rr,
     get_rrkeys,
+    get_cnn_rootdir,
     get_cnn,
     get_cnnkeys,
 )
@@ -28,7 +29,7 @@ from argparse import ArgumentParser
 log = get_logger()
 
 allowed_extras = ["redrock", "cont", "zelda", "cnn"]
-
+default_cnn_rootdir = get_cnn_rootdir()
 
 def parse():
     parser = ArgumentParser()
@@ -60,10 +61,16 @@ def parse():
         default=9,
     )
     parser.add_argument(
-        "--cnnfn",
-        help="full path to the CNN file; the same folder should contain the redrock files (default=None)",
+        "--cnnrootdir",
+        help="full path to the root CNN folder (default={})".format(default_cnn_rootdir),
         type=str,
-        default=None,
+        default=default_cnn_rootdir,
+    )
+    parser.add_argument(
+        "--cnnsubdir",
+        help="sub-folder name (CNN files will be e.g. in {args.cnndir}/loa/healpix/tertiary26-thru20230416-loa/{args.cnnsubdir}) (default=lbgV32sp+CNNJ7W0P1)",
+        type=str,
+        default="lbgV32sp+CNNJ7W0P1",
     )
     parser.add_argument(
         "--numproc",
@@ -292,13 +299,14 @@ def main():
     # cnn
     if "cnn" in args.extras.split(","):
 
-        assert args.cnnfn is not None
+        assert args.cnnrootdir is not None
+        assert args.cnnsubdir is not None
 
         d = Table(h[ext].data)
         key_prefix = "CNN"
 
         # get cnn infos
-        cnn = get_cnn(d["TARGETID"], args.cnnfn)
+        cnn = get_cnn(d["TARGETID"], d["COADDFN"], args.cnnrootdir, args.cnnsubdir)
         for key in get_cnnkeys():
             d["{}_{}".format(key_prefix, key)] = cnn[key]
 
@@ -307,7 +315,8 @@ def main():
         for key in h[ext].header:
             if key not in myh.header:
                 myh.header[key] = h[ext].header[key]
-        myh.header["CNNFN"] = args.cnnfn
+        myh.header["CNNROOT"] = args.cnnrootdir
+        myh.header["CNNSUB"] = args.cnnsubdir
 
         i = [_ for _ in range(1, len(h)) if h[_].header["EXTNAME"] == ext][0]
         h[i] = myh

@@ -12,7 +12,8 @@ from desitarget.geomask import match, match_to
 from redrock.results import read_zscan
 from desiutil.log import get_logger
 
-from desihiz.extras_utils import wave_lya, wave_oii
+from desihiz.hizmerge_io import get_spec_rootdir
+
 
 log = get_logger()
 
@@ -103,39 +104,69 @@ def get_rr(tids, cofns, rrsubdir, dchi2_0_min, numproc):
     return d
 
 
+def get_cnn_rootdir():
+    return os.path.join(os.getenv("DESI_ROOT"), "users", "cmv", "lbglae")
+
+
 def get_cnnkeys():
 
     keys = [
         "Z",
         "CL",
+        "RR_Z",
     ]
 
     return keys
 
 
-def get_cnn(tids, cnnfn):
+def get_cnndirs(coaddfns, cnnrootdir, cnnsubdir):
+
+    cnndirs = np.zeros(len(coaddfns), dtype=object)
+    coadddirs = np.array([os.path.dirname(_) for _ in coaddfns])
+    for coadddir in np.unique(coadddirs):
+        sel = coadddirs == coadddir
+        cnndirs[sel] = os.path.join(
+            coadddir.replace(get_spec_rootdir(), cnnrootdir),
+            cnnsubdir
+        )
+    return cnndirs.astype(str)
+
+
+def get_cnn(tids, coaddfns, cnnrootdir, cnnsubdir):
 
     d = Table()
-    d["CL"] = -99.0 + np.zeros(len(tids))
-    d["Z"] = -99.0
+    d["Z"] = -99.0 + np.zeros(len(tids))
+    d["CL"] = -99.0
+    d["RR_Z"] = -99.0
 
-    # read the cnn file
-    c = Table(fitsio.read(cnnfn))
-    ii, iic = match(tids, c["TARGETID"])
-    log.info("{}/{} TARGETIDs are in {}".format(ii.size, len(d), cnnfn))
-    d["CL"][ii] = c["CL_cnn"][iic]
+    # AR CNN folders
+    cnndirs = get_cnndirs(coaddfns, cnnrootdir, cnnsubdir)
 
-    # now read the redrock files
-    pattern = os.path.join(os.path.dirname(cnnfn), "redrock-*.fits")
-    fns = sorted(glob(pattern))
-    log.info("found {} {} files".format(len(fns), pattern))
-    rr = vstack([Table(fitsio.read(fn, "REDSHIFTS")) for fn in fns])
-    ii, iirr = match(tids, rr["TARGETID"])
-    log.info(
-        "{}/{} TARGETIDs are in the {} {} files".format(
-            ii.size, len(d), len(fns), pattern
-        )
-    )
-    d["Z"][ii] = rr["Z"][iirr]
+    for cnndir in np.unique(cnndirs):
+
+        # AR CNN file
+        ii = np.where(cnndirs == cnndir)[0]
+        fn = os.path.join(cnndir, "res_cnn.fits")
+        d2 = Table(fitsio.read(fn))
+        iisub, ii2 = match(tids[ii], d2["TARGETID"])
+        log.info("{}/{} TARGETIDs are in {}".format(iisub.size, ii.size, fn))
+        d["Z"][ii[iisub]] = d2["z_best_cnn"][ii2]
+        d["CL"][ii[iisub]] = d2["CL_cnn"][ii2]
+
+        # AR redrock files
+        for coaddfn in np.unique(coaddfns[cnndirs == cnndir]):
+
+            ii = np.where((cnndirs == cnndir) & (coaddfns == coaddfn))[0]
+            fn = os.path.join(cnndir, os.path.basename(coaddfn)).replace(
+                "coadd", "redrock"
+            )
+            r = Table(fitsio.read(fn, "REDSHIFTS"))
+            iisub, iir = match(tids[ii], r["TARGETID"])
+            log.info(
+                "{}/{} TARGETIDs matched for the {} file".format(
+                    iisub.size, ii.size, fn
+                )
+            )
+            d["RR_Z"][ii[iisub]] = r["Z"][iir]
 
     return d
