@@ -12,6 +12,7 @@ from astropy.io import fits
 from astropy.table import Table, vstack
 from astropy import units as u
 from scipy.optimize import curve_fit
+from scipy.signal import find_peaks
 from matplotlib import pyplot as plt
 
 from desitarget.geomask import match_to, match
@@ -72,6 +73,12 @@ def get_zelda_init_table(n):
             d[key] = +99.0
         else:
             d[key] = -99.0
+    for key in [
+        "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI",
+        "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI",
+        "LYABLU_FLUX", "LYARED_FLUX",
+    ]:
+        d[key] = np.nan
 
     return d
 
@@ -103,6 +110,86 @@ def get_zelda_rescale(fs, ivs, mod_fs):
     return sls[i]
 
 
+def initialize_zelda_peaks():
+
+    return {
+        key : np.nan for key in [
+            "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI", "LYABLU_FLUX",
+            "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
+        ]
+    }
+
+
+def get_zelda_peaks(ws, zelda_z50, zelda_fs50, peak_min_height=0.1):
+
+    # AR initialize
+    mydict = initialize_zelda_peaks()
+
+    # AR subtract continuum, normalize peak to 1
+    tmpfs = zelda_fs50.copy()
+    tmpfs -= np.median(tmpfs)
+    tmpfs /= tmpfs.max()
+
+    # AR search peaks
+    ii, _ = find_peaks(tmpfs, height=peak_min_height, width=1)
+
+    bound_ii = []
+    if ii.size > 0:
+        # AR case where there s a single peak, with a bump on the red side
+        # AR the code will identify two peaks
+        # AR we thus add the constraint that one of the two peaks should be
+        # AR bluer than wave_lya
+        # AR if not, we just pick the highest flux value peak
+        if len(ii) == 2:
+            if ws[ii[0]] / (1 + zelda_z50) > wave_lya:
+                ii = np.array([ii[tmpfs[ii].argmax()]])
+
+        if len(ii) == 1:
+            i = ii[0]
+            jj = np.where((ws < ws[i]) & (tmpfs > 0.01))[0]
+            if jj.size == 0:
+                return mydict
+            bound_ii.append(jj[0])
+            jj = np.where((ws > ws[i]) & (tmpfs > 0.01))[0]
+            if jj.size == 0:
+                return mydict
+            bound_ii.append(jj[-1])
+
+        if ii.size == 2:
+            # AR blue boundary of blue peak
+            i = ii[0]
+            bound_ii.append(np.where((ws < ws[i]) & (tmpfs > 0.01))[0][0])
+            # AR peaks separation wavelength
+            # AR if no separation found, we consider it as a single peak
+            jj = np.where((np.diff(tmpfs) > 0) & (ws[1:] > ws[ii[0]]) & (ws[1:] < ws[ii[1]]))[0]
+            kk = 1 + np.where((np.diff(tmpfs) < 0) & (ws[1:] > ws[ii[0]]) & (ws[1:] < ws[ii[1]]))[0]
+            jj = jj[np.in1d(jj, kk)]
+            if jj.size == 1:
+                bound_ii.append(jj[0])
+            else:
+                ii = ii[[tmpfs[ii].argmax()]]
+            # AR red boundary of red peak
+            i = ii[-1]
+            bound_ii.append(np.where((ws > ws[i]) & (tmpfs > 0.01))[0][-1])
+
+        if len(ii) == 1:
+            assert len(bound_ii) == 2
+            mydict["LYARED_WLO"] = ws[bound_ii[0]]
+            mydict["LYARED_WHI"] = ws[bound_ii[1]]
+            mydict["LYARED_WCEN"] = ws[ii][0]
+        if len(ii) == 2:
+            assert len(bound_ii) == 3
+            mydict["LYABLU_WLO"] = ws[bound_ii[0]]
+            mydict["LYABLU_WHI"] = ws[bound_ii[1]]
+            mydict["LYABLU_WCEN"] = ws[ii][0]
+            mydict["LYARED_WLO"] = ws[bound_ii[1]]
+            mydict["LYARED_WHI"] = ws[bound_ii[2]]
+            mydict["LYARED_WCEN"] = ws[ii][1]
+
+    return mydict
+
+
+
 def zelda_make_plot(
     outpng,
     zelda_model,
@@ -120,6 +207,7 @@ def zelda_make_plot(
     zelda_fs84,
     rchi2,
     PNR_t,
+    zelda_ws_dict,
     title,
 ):
 
@@ -138,8 +226,8 @@ def zelda_make_plot(
     cont = np.median(fs[ivs > 0])
     ax.axhline(cont, ls="--", color="b", label="data continuum")
 
-    ax.plot(ws, zelda_fs50, color="orange", label="zelda fit")
-    ax.fill_between(ws, zelda_fs16, zelda_fs84, color="orange", alpha=0.25)
+    ax.plot(ws, zelda_fs50, color="r", label="zelda fit")
+    ax.fill_between(ws, zelda_fs16, zelda_fs84, color="r", alpha=0.25)
 
     ax.axvline(
         wave_lya * (1 + z_peak),
@@ -180,6 +268,25 @@ def zelda_make_plot(
         ax.text(x0, y, txt0, fontsize=7, fontweight="bold", transform=ax.transAxes)
         ax.text(x1, y, txt1, fontsize=7, fontweight="bold", transform=ax.transAxes)
         y += dy
+
+    # AR plot identified peaks
+    npeak = np.isfinite([zelda_ws_dict["LYABLU_WCEN"], zelda_ws_dict["LYARED_WCEN"]]).sum()
+    txt = "found {} peak(s)".format(npeak)
+    if npeak == 1:
+        wlo, whi = zelda_ws_dict["LYARED_WLO"], zelda_ws_dict["LYARED_WHI"]
+        sel = (ws >= wlo) & (ws <= whi)
+        tmpmax = fs[sel].max()
+        ax.fill_between([wlo, whi], [-1, -1], [tmpmax, tmpmax], color="g", alpha=0.5, zorder=0)
+    if npeak == 2:
+        for wlo, whi in zip(
+            [zelda_ws_dict["LYABLU_WLO"], zelda_ws_dict["LYARED_WLO"]],
+            [zelda_ws_dict["LYABLU_WHI"], zelda_ws_dict["LYARED_WHI"]],
+        ):
+            sel = (ws >= wlo) & (ws <= whi)
+            tmpmax = fs[sel].max()
+            ax.fill_between([wlo, whi], [-1, -1], [tmpmax, tmpmax], alpha=0.5, zorder=0)
+        txt += " (b/r ratio={:.1f})".format(zelda_ws_dict["LYABLU_FLUX"] / zelda_ws_dict["LYARED_FLUX"])
+    ax.text(0.05, 0.25, txt, transform=ax.transAxes)
 
     plt.savefig(outpng, bbox_inches="tight")
     plt.close()
@@ -356,6 +463,17 @@ def get_zelda_fit_one_spectrum(
     # https://github.com/desihub/fastspecfit/blob/2827be47fb46846de43dd167ceb9426387e82631/py/fastspecfit/emlines.py#L944
     lya_ew = lya_flux / cont / (1.0 + mod["z_50"])  # rest frame [A]
 
+    # blue/red peaks
+    zelda_ws_dict = initialize_zelda_peaks()
+    if mod["z_84"] - mod["z_16"] < 0.01:
+        zelda_ws_dict = get_zelda_peaks(ws, mod["z_50"], mod["flux_50"])
+        if np.isfinite(zelda_ws_dict["LYABLU_WCEN"]):
+            sel = (ws >= zelda_ws_dict["LYABLU_WLO"]) & (ws <= zelda_ws_dict["LYABLU_WHI"])
+            zelda_ws_dict["LYABLU_FLUX"] = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
+        if np.isfinite(zelda_ws_dict["LYARED_WCEN"]):
+            sel = (ws >= zelda_ws_dict["LYARED_WLO"]) & (ws <= zelda_ws_dict["LYARED_WHI"])
+            zelda_ws_dict["LYARED_FLUX"] = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
+
     # plot?
     if outpng is not None:
         zelda_make_plot(
@@ -375,15 +493,21 @@ def get_zelda_fit_one_spectrum(
             mod["flux_84"],
             rchi2,
             PNR_t,
+            zelda_ws_dict,
             title,
         )
 
     # fill table with outputs
-    d["FIT"] = [True]
-    d["Z"], d["ZLO"], d["ZHI"] = [mod["z_50"]], [mod["z_16"]], [mod["z_84"]]
-    d["LYAPEAK_Z"] = [z_peak]
-    d["RCHI2"], d["LYAPEAK_PNR"] = [rchi2], [PNR_t]
-    d["LYAFLUX"], d["LYAEW"] = [lya_flux], [lya_ew]
+    d["FIT"] = True
+    d["Z"], d["ZLO"], d["ZHI"] = mod["z_50"], mod["z_16"], mod["z_84"]
+    d["LYAPEAK_Z"] = z_peak
+    d["RCHI2"], d["LYAPEAK_PNR"] = rchi2, PNR_t
+    d["LYAFLUX"], d["LYAEW"] = lya_flux, lya_ew
+    for key in [
+        "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI", "LYABLU_FLUX",
+        "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
+    ]:
+        d[key] = zelda_ws_dict[key]
 
     # restore copies
     ws, fs, ivs = ws_copy, fs_copy, ivs_copy
