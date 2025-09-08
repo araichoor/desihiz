@@ -11,6 +11,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table, vstack
 from astropy import units as u
+from astropy.cosmology import Planck18
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from matplotlib import pyplot as plt
@@ -68,6 +69,7 @@ def get_zelda_init_table(n):
         "LYAPEAK_PNR",
         "LYAFLUX",
         "LYAEW",
+        "LUMDIST_CM",
     ]:
         if key == "ZHI":
             d[key] = +99.0
@@ -508,6 +510,9 @@ def get_zelda_fit_one_spectrum(
         "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
     ]:
         d[key] = zelda_ws_dict[key]
+
+    # luminosity distance (in cm)
+    d["LUMDIST_CM"] = Planck18.luminosity_distance(mod["z_50"]).to(u.cm).value
 
     # restore copies
     ws, fs, ivs = ws_copy, fs_copy, ivs_copy
