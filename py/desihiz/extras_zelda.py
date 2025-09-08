@@ -77,7 +77,6 @@ def get_zelda_init_table(n):
         "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI",
         "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI",
         "LYABLUFLUX", "LYAREDFLUX",
-        "LYABLULUM", "LYAREDLUM"
     ]:
         d[key] = np.nan
 
