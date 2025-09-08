@@ -12,8 +12,6 @@ from desitarget.geomask import match, match_to
 from redrock.results import read_zscan
 from desiutil.log import get_logger
 
-from desihiz.extras_utils import wave_lya, wave_oii
-
 log = get_logger()
 
 wave_lya = 1215.67
