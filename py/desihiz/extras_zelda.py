@@ -120,7 +120,7 @@ def initialize_zelda_peaks():
     }
 
 
-def get_zelda_peaks(ws, zelda_z50, zelda_fs50, blupeak_min_height=0.1):
+def get_zelda_peaks(ws, zelda_z50, zelda_fs50, peak_min_height=0.1):
 
     # AR initialize
     mydict = initialize_zelda_peaks()
@@ -131,7 +131,7 @@ def get_zelda_peaks(ws, zelda_z50, zelda_fs50, blupeak_min_height=0.1):
     tmpfs /= tmpfs.max()
 
     # AR search peaks
-    ii, _ = find_peaks(tmpfs, height=blupeak_min_height, width=1)
+    ii, _ = find_peaks(tmpfs, height=peak_min_height, width=1)
 
     bound_ii = []
     if ii.size > 0:
