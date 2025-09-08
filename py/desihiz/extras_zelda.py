@@ -76,7 +76,7 @@ def get_zelda_init_table(n):
     for key in [
         "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI",
         "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI",
-        "LYABLUFLUX", "LYAREDFLUX",
+        "LYABLU_FLUX", "LYARED_FLUX",
     ]:
         d[key] = np.nan
 
@@ -114,8 +114,8 @@ def initialize_zelda_peaks():
 
     return {
         key : np.nan for key in [
-            "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI",
-            "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI",
+            "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI", "LYABLU_FLUX",
+            "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
         ]
     }
 
@@ -271,7 +271,7 @@ def zelda_make_plot(
 
     # AR plot identified peaks
     npeak = np.isfinite([zelda_ws_dict["LYABLU_WCEN"], zelda_ws_dict["LYARED_WCEN"]]).sum()
-    ax.text(0.05, 0.25, "found {} peak(s)".format(npeak), transform=ax.transAxes)
+    txt = "found {} peak(s)".format(npeak)
     if npeak == 1:
         wlo, whi = zelda_ws_dict["LYARED_WLO"], zelda_ws_dict["LYARED_WHI"]
         sel = (ws >= wlo) & (ws <= whi)
@@ -285,6 +285,8 @@ def zelda_make_plot(
             sel = (ws >= wlo) & (ws <= whi)
             tmpmax = fs[sel].max()
             ax.fill_between([wlo, whi], [-1, -1], [tmpmax, tmpmax], alpha=0.5, zorder=0)
+        txt += " (b/r ratio={:.1f})".format(zelda_ws_dict["LYABLU_FLUX"] / zelda_ws_dict["LYARED_FLUX"])
+    ax.text(0.05, 0.25, txt, transform=ax.transAxes)
 
     plt.savefig(outpng, bbox_inches="tight")
     plt.close()
@@ -463,15 +465,14 @@ def get_zelda_fit_one_spectrum(
 
     # blue/red peaks
     zelda_ws_dict = initialize_zelda_peaks()
-    lyablu_flux, lyared_flux = np.nan, np.nan
     if mod["z_84"] - mod["z_16"] < 0.01:
         zelda_ws_dict = get_zelda_peaks(ws, mod["z_50"], mod["flux_50"])
         if np.isfinite(zelda_ws_dict["LYABLU_WCEN"]):
             sel = (ws >= zelda_ws_dict["LYABLU_WLO"]) & (ws <= zelda_ws_dict["LYABLU_WHI"])
-            lyablu_flux = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
+            zelda_ws_dict["LYABLU_FLUX"] = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
         if np.isfinite(zelda_ws_dict["LYARED_WCEN"]):
             sel = (ws >= zelda_ws_dict["LYARED_WLO"]) & (ws <= zelda_ws_dict["LYARED_WHI"])
-            lyared_flux = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
+            zelda_ws_dict["LYARED_FLUX"] = np.diff(ws)[0] * sel.sum() * ((fs[sel] * ivs[sel]).sum() / ivs[sel].sum() - cont)
 
     # plot?
     if outpng is not None:
@@ -503,11 +504,10 @@ def get_zelda_fit_one_spectrum(
     d["RCHI2"], d["LYAPEAK_PNR"] = rchi2, PNR_t
     d["LYAFLUX"], d["LYAEW"] = lya_flux, lya_ew
     for key in [
-        "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI",
-        "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI",
+        "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI", "LYABLU_FLUX",
+        "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
     ]:
         d[key] = zelda_ws_dict[key]
-    d["LYABLUFLUX"], d["LYAREDFLUX"] = lyablu_flux, lyared_flux
 
     # restore copies
     ws, fs, ivs = ws_copy, fs_copy, ivs_copy
