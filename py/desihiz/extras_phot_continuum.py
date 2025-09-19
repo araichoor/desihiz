@@ -552,33 +552,19 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
 
     nband = len(phot_bands)
 
-    # AR all filter speclite curves
+    # AR load all filters
     global all_filts
     if all_filts is None:
         all_filts = get_speclite_all_filts()
 
-    # AR first grab the photometry totalflux -> fiberflux factor
-    # AR fiberflux columns will be there for tractor-based catalogs
-    # AR if no fiberflux columns (or valid values), we assume a psf profile
-    # AR with a fiberflux/totalflux=0.782
-    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
-    tot2fib = np.nan
-    for ffkey in ffkeys:
-        #
-        if p[ffkey] != 0:
-            x = p[ffkey] / p[ffkey.replace("FIBERFLUX", "FLUX")]
-            if np.isfinite(tot2fib):
-                assert np.abs(tot2fib - x) < 1e-6
-            else:
-                tot2fib = x
-    if ~np.isfinite(tot2fib):
-        tot2fib = 0.782
+    # AR filter properties
+    speclite_filtnames, weffs, wmins, wmaxs, islyas = get_phot_filt_props(p, z, phot_bands)
 
-    # AR now grab the photometry
-    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
-    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
-    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
-    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
+    # AR factor to convert from tractor total flux to desi psf-flux
+    tractor2desi_factors = get_tractor2desi_factors(
+        p,
+        s["MEAN_PSF_TO_FIBER_SPECFLUX"]
+    )
 
     fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
 
@@ -586,53 +572,10 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     phot_fs = np.array([p[k] for k in fkeys])
     phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys])
     # AR tractor fiber fluxes
-    phot_fs *= tot2fib
-    phot_ivs /= tot2fib**2
-    # AR (desi-like) psf fluxes
-    phot_fs /= s["MEAN_PSF_TO_FIBER_SPECFLUX"]
-    phot_ivs *= s["MEAN_PSF_TO_FIBER_SPECFLUX"] ** 2
-
-    # AR speclite filtname for each row/band
-    bb_img = p["BB_IMG"]
-    speclite_filtnames = np.zeros(nband, dtype=object)
-    for j in range(nband):
-        band = phot_bands[j]
-        if band in bb_bands:
-            if bb_img == "":
-                continue
-            if (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0):
-                speclite_filtnames[j] = get_speclite_filtname(band, bb_img=bb_img)
-        else:
-            assert band in not_bb_bands
-            speclite_filtnames[j] = get_speclite_filtname(band)
-
-    # AR effective wavelengths
-    weffs = np.nan + np.zeros(nband)
-    wmins = np.nan + np.zeros(nband)
-    wmaxs = np.nan + np.zeros(nband)
-    for j in range(nband):
-        speclite_filtname = speclite_filtnames[j]
-        if speclite_filtname != 0:
-            i_filt = [
-                _
-                for _ in range(len(all_filts.names))
-                if all_filts.names[_] == speclite_filtname
-            ][0]
-            weffs[j] = all_filts.effective_wavelengths[i_filt].value
-            tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
-            tmpws = tmpws[tmprs > 0.01 * tmprs]
-            wmins[j], wmaxs[j] = tmpws[0], tmpws[-1]
-
-    # AR does the band cover lya? (we take a +/- 5A buffer)
-    islyas = (wmins < wave_lya * (1 + z) + 5) & (wmaxs > wave_lya * (1 + z) - 5)
-
-    # AR convert fluxes from nanonmaggies to 1e-17 * erg/cm2/s/A
-    # AR https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
-    # AR first to Jy:
-    # AR                f_Jy = 3.631 * 1e-6 * f_nmgy
-    # AR then to erg/s/cm2/A:
-    # AR                f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
-    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs**2) * 1e17
+    phot_fs *= tractor2desi_factors
+    phot_ivs /= tractor2desi_factors ** 2
+    # AR now convert from nanonmaggies to 1e-17 * erg/cm2/s/A
+    factors = get_nmgy2desi_factors(weffs)
     phot_fs *= factors
     phot_ivs /= factors**2
 
@@ -641,9 +584,11 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     phot_ivs[sel] = 0.0
 
     # AR set ivar to zero for bands covering lya
+    orig_phot_ivs = phot_ivs.copy()
     phot_ivs[islyas] = 0.0
 
-    coeff, beta = np.nan, np.nan
+    # AR fit
+    coeff, beta, rchi2 = np.nan, np.nan, np.nan
     p0 = np.array([1.0, -2.0])
     bounds = ((0, -5), (100, 5))
     sel = (phot_ivs != 0) & (np.isfinite(phot_fs))
@@ -663,6 +608,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
                     if all_filts.names[_] == filtname
                 ][0]
             )
+        forfit_filt_indxs = np.array(forfit_filt_indxs)
         try:
             popt, pcov = curve_fit(
                 get_powerlaw_desifs,
@@ -674,10 +620,47 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
                 bounds=bounds,
             )
             coeff, beta = popt[0], popt[1]
+            fit_phot_fs = get_powerlaw_desifs(
+                (forfit_filt_indxs, np.array([z for _ in weffs[sel]])),
+                coeff,
+                beta,
+            )
+            ndof = len(forfit_phot_fs) - 2
+            rchi2 = ((forfit_phot_fs - fit_phot_fs) ** 2 * forfit_phot_ivs).sum() / ndof
         except ValueError:
             log.warning("fit failed for TARGETID={}".format(s["TARGETID"]))
 
-    return coeff, beta, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+    # AR now compute the rest-frame EW using the relevant band overlapping lya
+    # AR - our continuum (with IGM) is: my_cont = igm * cont
+    # AR - the tractor narrow/medium-band flux is: tractor_flux = igm * (cont + lya)
+    # AR so the rest-frame EW is: (tractor_flux / my_cont - 1)/ (1 + z)
+    # AR the relevant band is picked as follows:
+    # AR - first restrict to not-broad-bands overlapping the lya
+    # AR - then pick the one where the weff is the closest to the lya line
+    phot_cont, phot_cont_and_lya, ew, ew_band = np.nan, np.nan, np.nan, ""
+    if (np.isfinite(coeff)) & (np.isfinite(beta)) & (np.isfinite(z)):
+        phot_ivs = orig_phot_ivs.copy() # AR remove the ivs=0 for band overlapping lya
+        bb_bands, not_bb_bands = identify_bb_bands(phot_bands)
+        sel = phot_ivs != 0                         # AR valid flux
+        sel &= islyas                               # AR overlap lya
+        sel &= np.isin(phot_bands, not_bb_bands)    # AR not-broad-band
+        sel &= np.isfinite(weffs)                   # AR valid weff
+        jj = np.where(sel)[0]
+        if jj.size > 0:
+            j = jj[np.abs(weffs[jj] - wave_lya * (1 + z)).argmin()]
+            phot_cont_and_lya = phot_fs[j]
+            filtname = speclite_filtnames[j]
+            specliteindx = np.array([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname])
+            specliteindx_z = (specliteindx, np.array([z]))
+            phot_cont = get_powerlaw_desifs(specliteindx_z, coeff, beta)[0]
+            band_widths = np.array([wmax - wmin for wmin, wmax in zip(wmins[jj], wmaxs[jj])])
+            ew_band = phot_bands[j]
+            #ew = (wmaxs[j] - wmins[j]) * (phot_cont_and_lya / phot_cont - 1.) / (1. + z)
+            ew = 10 * (1+z) * (phot_cont_and_lya / phot_cont - 1.) / (1. + z)
+            # print("{}\t{:.2f}\t{}\t{:.2f}\t{:.2f}\t{:.2f}".format(p["TARGETID"], z, ew_band, phot_cont, phot_cont_and_lya, ew))
+
+
+    return coeff, beta, rchi2, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs, phot_cont, phot_cont_and_lya, ew, ew_band
 
 
 def get_continuum_params(s, p, zs, phot_bands, numproc):
@@ -731,13 +714,8 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
     # AR first build the Inoue14 grid
     build_igm_inoue14_zgrid(zs, numproc)
 
-    # AR now grab the photometry
-    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
-    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
-    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
-    log.info("bb_bands = {}".format(", ".join(bb_bands)))
-    log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
-    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
+    # AR identify broad-bands, and narrow/medium-bands
+    bb_bands, not_bb_bands = identify_bb_bands(phot_bands)
 
     ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
     log.info("found these FIBERFLUX columns: {}".format(", ".join(ffkeys)))
@@ -758,14 +736,19 @@ def get_continuum_params(s, p, zs, phot_bands, numproc):
 
     coeffs = np.array([out[0] for out in outs])
     betas = np.array([out[1] for out in outs])
-    weffs = np.vstack([out[2] for out in outs])
-    wmins = np.vstack([out[3] for out in outs])
-    wmaxs = np.vstack([out[4] for out in outs])
-    islyas = np.vstack([out[5] for out in outs])
-    phot_fs = np.vstack([out[6] for out in outs])
-    phot_ivs = np.vstack([out[7] for out in outs])
+    rchi2s = np.array([out[2] for out in outs])
+    weffs = np.vstack([out[3] for out in outs])
+    wmins = np.vstack([out[4] for out in outs])
+    wmaxs = np.vstack([out[5] for out in outs])
+    islyas = np.vstack([out[6] for out in outs])
+    phot_fs = np.vstack([out[7] for out in outs])
+    phot_ivs = np.vstack([out[8] for out in outs])
+    phot_conts = np.array([out[9] for out in outs])
+    phot_cont_and_lyas = np.array([out[10] for out in outs])
+    ews = np.array([out[11] for out in outs])
+    ew_bands = np.array([out[12] for out in outs])
 
-    return coeffs, betas, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs
+    return coeffs, betas, rchi2s, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs, phot_conts, phot_cont_and_lyas, ews, ew_bands
 
 
 def get_continuum_params_ress_default_wlohi():
