@@ -855,6 +855,10 @@ def plot_continuum_params(
     coeffs,
     betas,
     ress,
+    photconts,
+    photcontandlyas,
+    ews,
+    ewbands,
 ):
     """
     Make a diagnosis plot of the continuum estimation from the photometry, and compares with spectroscopy.
@@ -878,6 +882,10 @@ def plot_continuum_params(
         coeffs: the multiplicative coefficients, in 1e-17 erg/s/cm2/A (np.array of floats)
         betas: the slopes (np.array of floats)
         ress: the spectra-phot_cont median residuals (np.array of floats)
+        photconts: the phot. continuum flux (in 1e-17 erg/s/cm2/A) at the considered band (np.array of floats)
+        photcontandlyas: the phot. continuum+lya flux (in 1e-17 erg/s/cm2/A) at the considered band (np.array of floats)
+        ews: the phot. rest-frame EWs (np.array of floats)
+        ewbands: the considered band for photconts and photcontandlyas (np.array of strs) 
 
     Notes:
         ws is a (Nrow) array, fs and ivs are (Nrow, Nwave) arrays.
@@ -899,7 +907,18 @@ def plot_continuum_params(
         "TARGETID = {} (input_z = {:.2f})".format(tid, z)
         for tid, z in zip(s["TARGETID"], zs)
     ]
-    txtss = np.array([None for _ in zs])
+    txtss = np.array(
+        [
+            [
+                "Phot. cont. band: {}".format(ewband),
+                "Phot. cont. flux: {:.2f}".format(photcont),
+                "Phot. cont+lya flux: {:.2f}".format(photcontandlya),
+                "Phot. r.-f. EW: {:.1f}A".format(ew)
+            ] for ewband, photcont, photcontandlya, ew in zip(
+                ewbands, photconts, photcontandlyas, ews
+            )
+        ]
+    )
 
     myargs = [
         (
@@ -994,96 +1013,114 @@ def plot_continuum_params_indiv(
         phot_bands, weffs_i, wmins_i, wmaxs_i, phot_fs_i, phot_ivs_i, islyas_i are (Nband) arrays.
     """
 
-    fig, ax = plt.subplots()
-    smf, _ = get_smooth(fs_i, ivs_i, 5)
-    ax.scatter(
-        weffs_i[~islyas_i],
-        phot_fs_i[~islyas_i],
-        c="g",
-        zorder=2,
-        label="Tractor photometry (used)",
-    )
-    ax.scatter(
-        weffs_i[islyas_i],
-        phot_fs_i[islyas_i],
-        marker="x",
-        c="r",
-        zorder=2,
-        label="Tractor photometry (not used)",
-    )
-    y, dy = -0.05, -0.015
-    ii = weffs_i.argsort()
-    for band, weff, wmin, wmax, islya in zip(
-        phot_bands[ii], weffs_i[ii], wmins_i[ii], wmaxs_i[ii], islyas_i[ii]
+    wcen = wave_lya * (1 + z)
+
+    fig = plt.figure(figsize=(15, 5))
+    gs = gridspec.GridSpec(1, 2, hspace=0.2)
+    for ip, (xlim, ylim, lw) in enumerate(
+        zip(
+            [(3600, 9800), (wcen - 250, wcen + 250)],
+            [(-0.25, 0.50), (-0.25, 1.50)],
+            [0.5, 2.0],
+        )
     ):
-        if islya:
-            col = "r"
-        else:
-            col = "g"
-        if np.isfinite(weff):
-            ax.plot([wmin, wmax], [y, y], color=col, lw=3, alpha=0.5)
-            ax.text(weff, y, band, color=col, ha="center", va="center")
-        y += dy
-    sel = (np.isfinite(phot_ivs_i)) & (phot_ivs_i != 0)
-    ax.errorbar(
-        weffs_i[sel],
-        phot_fs_i[sel],
-        1.0 / np.sqrt(phot_ivs_i[sel]),
-        color="none",
-        ecolor="g",
-        elinewidth=5,
-        zorder=2,
-    )
-    conts = get_cont_powerlaw(ws, z, coeff, beta)
-    ax.plot(ws, conts, zorder=3, label="Model Power Law")
-    ax.plot(ws, smf, lw=0.5, zorder=1, label="DESI spectrum")
-    sel = (ws / (1 + z) > 1300) & (ws / (1 + z) < 1900)
-    ax.plot(
-        ws[sel], ws[sel] * 0 + 0.2, color="k", lw=3, alpha=0.5, label="Region for norm."
-    )
-    ax.plot(ws, conts + res, lw=1, zorder=3, color="k", label="Renorm. model Power Law")
-    wcen = 1215.7 * (1 + z)
-    ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
-    ax.set_title(title)
-    if ~np.isfinite(coeff):
-        ax.text(0.5, 0.95, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(
-            0.5,
-            0.95,
-            "Cont. power-law coeff={:.2f}".format(coeff),
-            transform=ax.transAxes,
+        ax = plt.subplot(gs[ip])
+        smf, _ = get_smooth(fs_i, ivs_i, 5)
+        ax.scatter(
+            weffs_i[~islyas_i],
+            phot_fs_i[~islyas_i],
+            c="g",
+            zorder=2,
+            label="Tractor photometry (used)",
         )
-    if ~np.isfinite(beta):
-        ax.text(0.5, 0.90, "Cont. power-law beta=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(
-            0.5,
-            0.90,
-            "Cont. power-law beta={:.2f}".format(beta),
-            transform=ax.transAxes,
+        ax.scatter(
+            weffs_i[islyas_i],
+            phot_fs_i[islyas_i],
+            marker="x",
+            c="r",
+            zorder=2,
+            label="Tractor photometry (not used)",
         )
-    if ~np.isfinite(res):
-        ax.text(0.5, 0.85, "Cont. power-law res=np.nan", transform=ax.transAxes)
-    else:
-        ax.text(
-            0.5,
-            0.85,
-            "(Cont. - spectrum) res.={:.3f}".format(res),
-            transform=ax.transAxes,
-        )
-    x, y, dy = 0.5, 0.80, -0.05
-    if txts is not None:
-        for txt in txts:
-            ax.text(x, y, txt, transform=ax.transAxes)
+        if ip == 0:
+            y, dy = -0.05, -0.015
+        if ip == 1:
+            y, dy = -0.05, -0.030
+        ii = weffs_i.argsort()
+        for band, weff, wmin, wmax, islya in zip(
+            phot_bands[ii], weffs_i[ii], wmins_i[ii], wmaxs_i[ii], islyas_i[ii]
+        ):
+            if islya:
+                col = "r"
+            else:
+                col = "g"
+            if (np.isfinite(weff)) & (wmax > xlim[0]) & (wmin < xlim[1]):
+                ax.plot([wmin, wmax], [y, y], color=col, lw=3, alpha=0.5)
+                if (weff > xlim[0]) & (weff < xlim[1]):
+                    ax.text(weff, y, band, color=col, ha="center", va="center")
             y += dy
-    ax.grid()
-    ax.set_axisbelow(True)
-    ax.set_xlim(3600, 9800)
-    ax.set_ylim(-0.25, 0.5)
-    ax.set_xlabel("Obs. wavelength [A]")
-    ax.set_ylabel("Flux [1e-17 erg/s/cm2/A]")
-    ax.legend(loc=2, fontsize=8)
+        sel = (np.isfinite(phot_ivs_i)) & (phot_ivs_i != 0)
+        ax.errorbar(
+            weffs_i[sel],
+            phot_fs_i[sel],
+            1.0 / np.sqrt(phot_ivs_i[sel]),
+            color="none",
+            ecolor="g",
+            elinewidth=5,
+            zorder=2,
+        )
+        conts = get_cont_powerlaw(ws, z, coeff, beta)
+        ax.plot(ws, conts, zorder=3, label="Model Power Law")
+        ax.plot(ws, smf, lw=lw, zorder=1, label="DESI spectrum")
+        sel = (ws / (1 + z) > 1300) & (ws / (1 + z) < 1900)
+        ax.plot(
+            ws[sel], ws[sel] * 0 + 0.2, color="k", lw=3, alpha=0.5, label="Region for norm."
+        )
+        ax.plot(ws, conts + res, lw=1, zorder=3, color="k", label="Renorm. model Power Law")
+        ax.axvline(wcen, color="k", lw=0.5, ls="--", zorder=-1)
+        if ip == 1:
+            ax.axvspan(wcen - 5 * (1 + z), wcen + 5 * (1 + z), color="k", alpha=0.1, zorder=-1)
+            x = 0.05
+            if ~np.isfinite(coeff):
+                ax.text(x, 0.95, "Cont. power-law coeff=np.nan", transform=ax.transAxes)
+            else:
+                ax.text(
+                    x,
+                    0.95,
+                    "Cont. power-law coeff={:.2f}".format(coeff),
+                    transform=ax.transAxes,
+                )
+            if ~np.isfinite(beta):
+                ax.text(x, 0.90, "Cont. power-law beta=np.nan", transform=ax.transAxes)
+            else:
+                ax.text(
+                    x,
+                    0.90,
+                    "Cont. power-law beta={:.2f}".format(beta),
+                    transform=ax.transAxes,
+                )
+            if ~np.isfinite(res):
+                ax.text(x, 0.85, "Cont. power-law res=np.nan", transform=ax.transAxes)
+            else:
+                ax.text(
+                    x,
+                    0.85,
+                    "(Cont. - spectrum) res.={:.3f}".format(res),
+                    transform=ax.transAxes,
+                )
+            y, dy = 0.70, -0.05
+            if txts is not None:
+                for txt in txts:
+                    ax.text(x, y, txt, transform=ax.transAxes)
+                    y += dy
+        if ip == 0:
+            ax.legend(loc=2, fontsize=8)
+        ax.set_title(title)
+        ax.grid()
+        ax.set_axisbelow(True)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_xlabel("Obs. wavelength [A]")
+        ax.set_ylabel("Flux [1e-17 erg/s/cm2/A]")
     plt.savefig(outpng, bbox_inches="tight")
     plt.close()
 
