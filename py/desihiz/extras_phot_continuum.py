@@ -168,6 +168,11 @@ def get_powerlaw_desifs(specliteindxs_zs, coeff, beta):
         of a single z value.
     """
 
+    # AR all filter speclite curves
+    global all_filts
+    if all_filts is None:
+        all_filts = get_speclite_all_filts()
+
     specliteindxs, zs = specliteindxs_zs
     specliteindxs = specliteindxs.astype(int)
     nband = len(specliteindxs)
