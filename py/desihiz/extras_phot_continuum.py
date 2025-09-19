@@ -488,6 +488,26 @@ def get_nmgy2desi_factors(weffs):
     return factors
 
 
+def identify_bb_bands(phot_bands):
+    """
+    Identify which bands are broad-bands, and which are not (ie narrow/medium).
+
+    Args:
+        phot_bands: list of photometric bands used for the continuum estimation (list of strs)
+
+    Returns:
+        bb_bands: list of the broad-bands (list of strs)
+        not_bb_bands: list of the not-broad-bands (list of strs)
+    """
+    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
+    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
+    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
+    #log.info("bb_bands = {}".format(", ".join(bb_bands)))
+    #log.info("not_bb_bands = {}".format(", ".join(not_bb_bands)))
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
+    return bb_bands, not_bb_bands
+
+
 def get_continuum_params_indiv(s, p, z, phot_bands):
     """
     Estimate a power-law for the continuum, based on the tractor photometry.
