@@ -314,6 +314,60 @@ def get_speclite_filtname(band, bb_img=None):
             raise ValueError(msg)
 
 
+def get_tractor2desi_factors(p, mean_psf_to_fiber_specfluxes):
+    """
+    Compute the conversion factor from Tractor fluxes to DESI fluxes.
+
+    Args:
+        p: the table with the tractor photometry (FLUX_* columns) (table for a single or multiple rows)
+        mean_psf_to_fiber_specfluxes: the DESI MEAN_PSF_TO_FIBER_SPECFLUX column (float or np.array of floats)
+
+    Returns
+        tractor2desifs_factors: conversion factors (float or np.array of floats)
+
+    Notes:
+        Tractor input fluxes are total fluxes (FLUX_*) in nanomaggies (so per-frequency flux densities).
+        We use the available FIBERFLUX columns to infer the 1.5-arcsec-diameter
+            fiber fluxes: tot2fibs = FIBERFLUX/FLUX;
+            if no available info, we use the default value for a PSF profile: tot2fibs = 0.782.
+        The factors are: tot2fibs / mean_psf_to_fiber_specfluxes.
+    """
+
+    # AR scalar?
+    is_scalar = np.isscalar(p["TARGETID"])
+    assert np.isscalar(mean_psf_to_fiber_specfluxes) == is_scalar
+    if is_scalar:
+        p = Table(p)
+        mean_psf_to_fiber_specfluxes = np.array([mean_psf_to_fiber_specfluxes])
+
+
+    # AR first grab the photometry totalflux -> fiberflux factor
+    # AR fiberflux columns will be there for tractor-based catalogs
+    # AR if no fiberflux columns (or valid values), we assume a psf profile
+    # AR with a fiberflux/totalflux=0.782
+    ffkeys = [_ for _ in p.colnames if _[:9] == "FIBERFLUX" and _ != "FIBERFLUX_SYNTHG"]
+    tot2fibs = np.nan + np.zeros(len(p))
+    for ffkey in ffkeys:
+        sel = p[ffkey] != 0
+        if sel.sum() > 0:
+            xs = p[ffkey][sel] / p[ffkey.replace("FIBERFLUX", "FLUX")][sel]
+            prev_xs = tot2fibs[sel]
+            sel2 = np.isfinite(prev_xs)
+            if sel2.sum() > 0:
+                assert np.abs(prev_xs[sel2] - xs[sel2]) < 1e-6
+            tot2fibs[sel] = xs
+    sel = ~np.isfinite(tot2fibs)
+    tot2fibs[sel] = 0.782
+
+    tractor2desifs_factors = tot2fibs / mean_psf_to_fiber_specfluxes
+
+    if is_scalar:
+        p, mean_psf_to_fiber_specfluxes = p[0], mean_psf_to_fiber_specfluxes[0]
+        tractor2desifs_factors = tractor2desifs_factors[0]
+
+    return tractor2desifs_factors
+
+
 def get_continuum_params_indiv(s, p, z, phot_bands):
     """
     Estimate a power-law for the continuum, based on the tractor photometry.
