@@ -93,6 +93,14 @@ def main():
     ext = "SPECINFO"
     h = fits.open(args.mergefn)
 
+    # for phot_cont, zelda
+    zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
+        "RR_Z0_ZELDA",
+        "RR_Z1_ZELDA",
+        "VI_Z_ZELDA",
+    ]
+    res_rf_wlo, res_rf_whi = get_continuum_params_ress_default_wlohi()
+
     # redrock
     if "redrock" in args.extras.split(","):
 
@@ -137,8 +145,6 @@ def main():
         phot_bands = np.array([_ for _ in phot_bands if _ != "SYNTHG"])
         nband = len(phot_bands)
 
-        zkeys = ["RR_Z0", "RR_Z1", "VI_Z"]
-
         for zkey in zkeys:
 
             if zkey in ["RR_Z0", "RR_Z1"]:
@@ -149,18 +155,27 @@ def main():
             # column names
             coeffkey = "{}_CONT_PL_COEFF".format(zkey)
             betakey = "{}_CONT_PL_BETA".format(zkey)
-            res_rf_wlo, res_rf_whi = get_continuum_params_ress_default_wlohi()
+            rchi2key = "{}_CONT_PL_RCHI2".format(zkey)
             reskey = "{}_CONT_RES_{}_{}".format(zkey, res_rf_wlo, res_rf_whi)
+            ewbandkey = "{}_PHOT_EW_BAND".format(zkey)
+            photcontkey = "{}_PHOT_CONT".format(zkey)
+            photcontandlyakey = "{}_PHOT_CONT_AND_LYA".format(zkey)
+            ewkey = "{}_PHOT_EW".format(zkey)
+            ewbandkey = "{}_PHOT_EW_BAND".format(zkey)
 
             # initialize
             s["{}_CONT".format(zkey)] = False
-            s[coeffkey], s[betakey], s[reskey] = np.nan, np.nan, np.nan
+            s[coeffkey], s[betakey], s[rchi2key], s[reskey] = np.nan, np.nan, np.nan, np.nan
             weffs = np.nan + np.zeros((nrow, nband))
             wmins = np.nan + np.zeros((nrow, nband))
             wmaxs = np.nan + np.zeros((nrow, nband))
             islyas = np.zeros((nrow, nband), dtype=bool)
             phot_fs = np.nan + np.zeros((nrow, nband))
             phot_ivs = np.nan + np.zeros((nrow, nband))
+            s[ewbandkey] = np.zeros(nrow, dtype=str).astype(object)
+            s[photcontkey] = np.nan
+            s[photcontandlyakey] = np.nan
+            s[ewkey] = np.nan
 
             # get continuum params (coeff * lambda ** beta)
             # only consider z > 2 rows, as we use the IGM in the process
@@ -169,16 +184,22 @@ def main():
                 (
                     s[coeffkey][ii],
                     s[betakey][ii],
+                    s[rchi2key][ii],
                     weffs[ii],
                     wmins[ii],
                     wmaxs[ii],
                     islyas[ii],
                     phot_fs[ii],
                     phot_ivs[ii],
+                    s[photcontkey][ii],
+                    s[photcontandlyakey][ii],
+                    s[ewkey][ii],
+                    s[ewbandkey][ii],
                 ) = get_continuum_params(s[ii], p[ii], zs[ii], phot_bands, args.numproc)
                 s[reskey][ii] = get_continuum_params_ress(
                     s[coeffkey][ii], s[betakey][ii], ws, fs[ii], ivs[ii], zs[ii]
                 )
+            s[ewbandkey] = s[ewbandkey].astype(str)
 
             # plot
             outpdf = args.mergefn.replace(
@@ -211,6 +232,10 @@ def main():
                 s[coeffkey][ii],
                 s[betakey][ii],
                 s[reskey][ii],
+                s[photcontkey][ii],
+                s[photcontandlyakey][ii],
+                s[ewkey][ii],
+                s[ewbandkey][ii],
             )
 
         # swap the extension
@@ -226,12 +251,6 @@ def main():
     if "zelda" in args.extras.split(","):
 
         d = Table(h[ext].data)
-
-        zkeys, key_prefixes = ["RR_Z0", "RR_Z1", "VI_Z"], [
-            "RR_Z0_ZELDA",
-            "RR_Z1_ZELDA",
-            "VI_Z_ZELDA",
-        ]
 
         # get zelda infos
         _, zelda_grids_dir, zelda_dnn_dir = get_default_zelda_dirs()
@@ -263,6 +282,9 @@ def main():
                 h["BRZ_WAVE"].data,
                 h["BRZ_FLUX"].data,
                 h["BRZ_IVAR"].data,
+                d["{}_CONT_PL_COEFF".format(zkey)],
+                d["{}_CONT_PL_BETA".format(zkey)],
+                d["{}_CONT_RES_{}_{}".format(zkey, res_rf_wlo, res_rf_whi)],
                 gauss_smooth,
                 outpdf,
                 nplot,
