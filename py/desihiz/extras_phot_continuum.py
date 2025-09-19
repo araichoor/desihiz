@@ -464,6 +464,29 @@ def get_phot_filt_props(p, zs, phot_bands):
     return speclite_filtnames, weffs, wmins, wmaxs, islyas
 
 
+def get_nmgy2desi_factors(weffs):
+    """
+    Convert fluxes from nanomaggies to to 1e-17 * erg/cm2/s/A,
+        i.e. DESI flux units, for one or more bands.
+
+    Args:
+        weffs: the effective wavelength of the band(s) (float or np.array())
+
+    Returns:
+        factors: the conversion factor (float, same format as weffs)
+
+    Notes:
+        https://en.wikipedia.org/wiki/AB_magnitude#Expression_in_terms_of_f%CE%BB
+        first from nmgy to Jy:
+                        f_Jy = 3.631 * 1e-6 * f_nmgy
+        then from Jy to erg/s/cm2/A:
+                        f_lam = 1 / (3.34 * 1e4 * w ** 2) * f_Jy
+                              = 3.631 * 1e-6 / (3.34 * 1e4 * w ** 2) * f_nmgy
+    """
+
+    factors = 3.631 * 1e-6 / (3.34 * 1e4 * weffs ** 2) * 1e17
+    return factors
+
 
 def get_continuum_params_indiv(s, p, z, phot_bands):
     """
