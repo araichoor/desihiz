@@ -11,6 +11,7 @@ from astropy.table import Table, vstack
 from astropy import units as u
 from scipy.optimize import curve_fit
 from matplotlib import pyplot as plt
+from matplotlib import gridspec
 
 from desiutil.log import get_logger
 from speclite import filters as speclite_filters
