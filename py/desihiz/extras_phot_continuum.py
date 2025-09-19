@@ -368,6 +368,103 @@ def get_tractor2desi_factors(p, mean_psf_to_fiber_specfluxes):
     return tractor2desifs_factors
 
 
+def get_phot_filt_props(p, zs, phot_bands):
+    """
+    Get the filter properties for a tractor catalog.
+
+    Args:
+        p: the "PHOTINFO" or "PHOTV2INFO" table for a single or several object(s)
+        zs: redshifts (float or np.array() of floats)
+        phot_bands: list of photometric bands used for the continuum estimation (list of strs)
+
+    Returns:
+        weffs: the effective wavelengths of the photometry (np.array of floats)
+        wmins: the minimum wavelengths of the bands (np.array of floats)
+        wmaxs: the maximum wavelengths of the bands (np.array of floats)
+        islyas: is the lya line falling in the band? (np.array of bools)
+
+    Notes:
+        The min/max of the band is the FWHM boundaries, i.e. where
+            response > 0.5 * max(response).
+        Columns used from p:
+            FLUX_{PHOT_BAND} and FLUX_IVAR_{PHOT_BAND}
+            FLUX_* and FIBERFLUX_*.
+        Output shapes:
+            weffs, wmins, wmaxs, islyas: (Nband) if inputs are scalar, (Nrow, Nband) otherwise.
+    """
+
+    is_scalar = np.isscalar(p["TARGETID"])
+    assert np.isscalar(zs) == is_scalar
+    if is_scalar:
+        p = Table(p)
+        zs = np.array([zs])
+    assert len(p) == len(zs)
+
+    nrow = len(p)
+    nband = len(phot_bands)
+
+    fkeys = ["FLUX_{}".format(_) for _ in phot_bands]
+
+    # AR all filter speclite curves
+    global all_filts
+    if all_filts is None:
+        all_filts = get_speclite_all_filts()
+
+    # AR broad-bands, narrow/medium bands
+    allowed_bb_bands, allowed_not_bb_bands = get_allowed_phot_bands()
+    bb_bands = [_ for _ in phot_bands if _ in allowed_bb_bands]
+    not_bb_bands = [_ for _ in phot_bands if _ in allowed_not_bb_bands]
+    assert np.all(np.isin(np.unique(phot_bands), np.unique(bb_bands + not_bb_bands)))
+
+    # AR speclite filtname for each row/band
+    speclite_filtnames = np.zeros((nrow, nband), dtype=object)
+    unq_bb_imgs = np.unique(p["BB_IMG"])
+    unq_bb_imgs = unq_bb_imgs[unq_bb_imgs != ""] # AR exclude those cases for bb_bands
+    for j in range(nband):
+        band = phot_bands[j]
+        if band in bb_bands:
+            sel = (np.isfinite(p[fkeys[j]])) & (p[fkeys[j]] != 0)
+            for bb_img in unq_bb_imgs:
+                sel2 = (sel) & (p["BB_IMG"] == bb_img)
+                speclite_filtnames[sel2, j] = get_speclite_filtname(band, bb_img=bb_img)
+        else:
+            assert band in not_bb_bands
+            speclite_filtnames[:, j] = get_speclite_filtname(band)
+
+    # AR effective wavelengths
+    weffs = np.nan + np.zeros((nrow, nband))
+    wmins = np.nan + np.zeros((nrow, nband))
+    wmaxs = np.nan + np.zeros((nrow, nband))
+    for j in range(nband):
+        unq_speclite_filtnames_j = np.unique(speclite_filtnames[:, j])
+        unq_speclite_filtnames_j = unq_speclite_filtnames_j[
+            unq_speclite_filtnames_j != 0
+        ]
+        for speclite_filtname in unq_speclite_filtnames_j:
+            i_filt = [
+                _
+                for _ in range(len(all_filts.names))
+                if all_filts.names[_] == speclite_filtname
+            ][0]
+            sel = speclite_filtnames[:, j] == speclite_filtname
+            weffs[sel, j] = all_filts.effective_wavelengths[i_filt].value
+            tmpws, tmprs = all_filts[i_filt].wavelength, all_filts[i_filt].response
+            #tmpws = tmpws[tmprs > 0.01 * tmprs.max()]
+            tmpws = tmpws[tmprs > 0.5 * tmprs.max()]
+            wmins[sel, j], wmaxs[sel, j] = tmpws[0], tmpws[-1]
+
+    # AR does the band cover lya? (we take a +/- 5A buffer)
+    islyas = (wmins < wave_lya * (1 + zs) + 5) & (wmaxs > wave_lya * (1 + zs) - 5)
+
+    if is_scalar:
+        p, zs = p[0], zs[0]
+        speclite_filtnames = speclite_filtnames[0]
+        weffs, wmins, wmaxs, islyas = weffs[0], wmins[0], wmaxs[0], islyas[0]
+
+    return speclite_filtnames, weffs, wmins, wmaxs, islyas
+
+
+
 def get_continuum_params_indiv(s, p, z, phot_bands):
     """
     Estimate a power-law for the continuum, based on the tractor photometry.
