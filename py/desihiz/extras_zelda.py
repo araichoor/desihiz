@@ -68,6 +68,7 @@ def get_zelda_init_table(n):
         "RCHI2",
         "LYAPEAK_PNR",
         "LYAFLUX",
+        "LYACONT",
         "LYAEW",
         "LUMDIST_CM",
     ]:
@@ -201,6 +202,7 @@ def zelda_make_plot(
     ivs,
     z,
     z_peak,
+    cont,
     zelda_z50,
     zelda_z16,
     zelda_z84,
@@ -225,7 +227,6 @@ def zelda_make_plot(
     ax.plot(ws, fs, color="b", label="data")
     ax.fill_between(ws, fs - efs, fs + efs, color="b", alpha=0.25)
 
-    cont = np.median(fs[ivs > 0])
     ax.axhline(cont, ls="--", color="b", label="data continuum")
 
     ax.plot(ws, zelda_fs50, color="r", label="zelda fit")
@@ -304,7 +305,7 @@ def zelda_make_plot(
 # fitting calling sequence based on https://zelda.readthedocs.io/en/latest/Tutorial_DNN.html
 # def get_zelda_fit_one_spectrum(LyaRT_Grid, machine_data, zelda_model, zelda_geometry, z, ws, fs, ivs, gauss_smooth, outpng, title):
 def get_zelda_fit_one_spectrum(
-    zelda_model, zelda_geometry, tid, z, ws, fs, ivs, gauss_smooth, outpng, title
+    zelda_model, zelda_geometry, tid, z, ws, fs, ivs, phot_conts, gauss_smooth, outpng, title
 ):
 
     # log.info(outpng)
@@ -345,13 +346,29 @@ def get_zelda_fit_one_spectrum(
 
     sel = (ws > wmin) & (ws < wmax)
     ws, fs, ivs = ws[sel], fs[sel], ivs[sel]
+    if phot_conts is not None:
+        phot_conts = phot_conts[sel]
 
     # smoothing?
     if gauss_smooth is not None:
         fs, ivs = get_smooth(fs, ivs, gauss_smooth)
 
     # we will remove the continuum for the fitting (even we use the tsc model)
-    cont = np.median(fs[ivs > 0])
+    # if phot_conts is provided we use that (median over +/- 2 rest-frame A)
+    # else we use spec_cont
+    spec_cont = np.median(fs[ivs > 0])
+    if phot_conts is not None:
+        phot_sel = (ws > (wave_lya - 2) * (1 + z)) & (ws < (wave_lya + 2) * (1 + z))
+        phot_cont = np.median(phot_conts[phot_sel])
+        log.info(
+            "TARGETID={}:\tfor EW, we use phot_cont={:.2f} (spec_cont={:.2f}; phot_cont - spec_cont = {:.2f}; differs by {:.1f}%)".format(
+                tid, phot_cont, spec_cont, phot_cont - spec_cont, 100 * (phot_cont - spec_cont) / spec_cont,
+            )
+        )
+        cont = phot_cont
+    else:
+        log.info("TARGETID={}:\tfor EW, we use spec_cont={:.2f}".format(tid, spec_cont))
+        cont = spec_cont
 
     # flux error
     efs = 1e99 + np.zeros(len(fs))
@@ -487,6 +504,7 @@ def get_zelda_fit_one_spectrum(
             ivs,
             z,
             z_peak,
+            cont,
             mod["z_50"],
             mod["z_16"],
             mod["z_84"],
@@ -504,7 +522,7 @@ def get_zelda_fit_one_spectrum(
     d["Z"], d["ZLO"], d["ZHI"] = mod["z_50"], mod["z_16"], mod["z_84"]
     d["LYAPEAK_Z"] = z_peak
     d["RCHI2"], d["LYAPEAK_PNR"] = rchi2, PNR_t
-    d["LYAFLUX"], d["LYAEW"] = lya_flux, lya_ew
+    d["LYACONT"], d["LYAFLUX"], d["LYAEW"] = cont, lya_flux, lya_ew
     for key in [
         "LYABLU_WLO", "LYABLU_WCEN", "LYABLU_WHI", "LYABLU_FLUX",
         "LYARED_WLO", "LYARED_WCEN", "LYARED_WHI", "LYARED_FLUX",
@@ -534,6 +552,9 @@ def get_zelda_fit(
     ws,
     fss,
     ivss,
+    phot_cont_coeffs,
+    phot_cont_betas,
+    phot_cont_ress,
     gauss_smooth,
     outpdf,
     nplot,
@@ -541,12 +562,12 @@ def get_zelda_fit(
 ):
 
     assert len(zs.shape) == 1
+    nrow = len(zs)
     assert len(ws.shape) == 1
-    assert len(fss.shape) == 2
-    assert ivss.shape == fss.shape
-    assert fss.shape[0] == tids.size
-    assert zs.size == tids.size
-    assert fss.shape[1] == ws.size
+    nwave = len(ws)
+    assert fss.shape == (nrow, nwave)
+    assert ivss.shape == (nrow, nwave)
+    assert tids.shape == (nrow,)
 
     # zelda stuff
     global LyaRT_Grid
@@ -559,10 +580,21 @@ def get_zelda_fit(
     )
     machine_data = pickle.load(open(fn, "rb"))
 
-    #
+    phot_contss = np.array([None for _ in range(nrow)])
+    if phot_cont_coeffs is not None:
+        from desihiz.extras_phot_continuum import get_cont_powerlaw
+        phot_contss = np.nan + np.zeros((nrow, nwave))
+        for i in range(nrow):
+            # AR power law (with IGM)
+            phot_contss[i] = get_cont_powerlaw(
+                ws, zs[i], phot_cont_coeffs[i], phot_cont_betas[i]
+            )
+            # AR add a correction to account for the spectro/phot offsets
+            phot_contss[i] += phot_cont_ress[i]
+
+    # AR pdf?
     outpngs = np.array([None for _ in zs])
     titles = np.array([None for _ in zs])
-
     if outpdf is not None:
 
         tmpdir = tempfile.mkdtemp()
@@ -579,8 +611,6 @@ def get_zelda_fit(
     for i in range(len(zs)):
         myargs.append(
             (
-                # LyaRT_Grid,
-                # machine_data,
                 zelda_model,
                 zelda_geometry,
                 tids[i],
@@ -588,6 +618,7 @@ def get_zelda_fit(
                 ws,
                 fss[i],
                 ivss[i],
+                None, # phot_contss[i],
                 gauss_smooth,
                 outpngs[i],
                 titles[i],
