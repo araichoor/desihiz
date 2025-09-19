@@ -147,7 +147,7 @@ def get_cont_powerlaw(ws, z, coeff, beta):
     return conts
 
 
-def get_powerlaw_desifs(specliteindxs_zs, coeff, beta):
+def get_powerlaw_filtfs(specliteindxs_zs, coeff, beta):
     """
     Returns the flux values of a power law convolved with passbands.
 
@@ -612,7 +612,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
         forfit_filt_indxs = np.array(forfit_filt_indxs)
         try:
             popt, pcov = curve_fit(
-                get_powerlaw_desifs,
+                get_powerlaw_filtfs,
                 (forfit_filt_indxs, np.array([z for _ in weffs[sel]])),
                 forfit_phot_fs,
                 maxfev=10000000,
@@ -621,7 +621,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
                 bounds=bounds,
             )
             coeff, beta = popt[0], popt[1]
-            fit_phot_fs = get_powerlaw_desifs(
+            fit_phot_fs = get_powerlaw_filtfs(
                 (forfit_filt_indxs, np.array([z for _ in weffs[sel]])),
                 coeff,
                 beta,
@@ -653,7 +653,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
             filtname = speclite_filtnames[j]
             specliteindx = np.array([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname])
             specliteindx_z = (specliteindx, np.array([z]))
-            phot_cont = get_powerlaw_desifs(specliteindx_z, coeff, beta)[0]
+            phot_cont = get_powerlaw_filtfs(specliteindx_z, coeff, beta)[0]
             band_widths = np.array([wmax - wmin for wmin, wmax in zip(wmins[jj], wmaxs[jj])])
             ew_band = phot_bands[j]
             #ew = (wmaxs[j] - wmins[j]) * (phot_cont_and_lya / phot_cont - 1.) / (1. + z)
