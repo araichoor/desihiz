@@ -638,7 +638,7 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     # AR [deprecated] so the rest-frame EW is: (tractor_flux / my_cont - 1)/ (1 + z)
     # AR
     # AR following discussion with Arjun:
-    # AR    EW = (tractor_flux - mycont) / PL_noIGM(w_lya) / (1 + z)
+    # AR    EW = filt_width * (tractor_flux - mycont) / PL_noIGM(w_lya) / (1 + z)
     # AR ie do not fold in the IGM in the denominator
     # AR remark, units:
     # AR - tractor_flux and mycont: erg/s/cm2/A
