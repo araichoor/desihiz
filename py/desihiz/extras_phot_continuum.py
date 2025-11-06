@@ -317,7 +317,7 @@ def get_speclite_filtname(band, bb_img=None):
 
 def get_tractor2desi_factors(p, mean_psf_to_fiber_specfluxes):
     """
-    Compute the conversion factor from Tractor fluxes to DESI fluxes.
+    Compute the conversion factor from Tractor fluxes (total flux) to "DESI fluxes".
 
     Args:
         p: the table with the tractor photometry (FLUX_* columns) (table for a single or multiple rows)
@@ -355,7 +355,7 @@ def get_tractor2desi_factors(p, mean_psf_to_fiber_specfluxes):
             prev_xs = tot2fibs[sel]
             sel2 = np.isfinite(prev_xs)
             if sel2.sum() > 0:
-                assert np.abs(prev_xs[sel2] - xs[sel2]) < 1e-6
+                assert np.all(np.abs(prev_xs[sel2] - xs[sel2]) < 1e-6)
             tot2fibs[sel] = xs
     sel = ~np.isfinite(tot2fibs)
     tot2fibs[sel] = 0.782
@@ -572,10 +572,10 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     # AR tractor total fluxes (nband)
     phot_fs = np.array([p[k] for k in fkeys])
     phot_ivs = np.array([p[k.replace("FLUX", "FLUX_IVAR")] for k in fkeys])
-    # AR tractor fiber fluxes
+    # AR desi total fluxes
     phot_fs *= tractor2desi_factors
     phot_ivs /= tractor2desi_factors ** 2
-    # AR now convert from nanonmaggies to 1e-17 * erg/cm2/s/A
+    # AR convert from nanonmaggies to 1e-17 * erg/cm2/s/A
     factors = get_nmgy2desi_factors(weffs)
     phot_fs *= factors
     phot_ivs /= factors**2
@@ -634,7 +634,18 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
     # AR now compute the rest-frame EW using the relevant band overlapping lya
     # AR - our continuum (with IGM) is: my_cont = igm * cont
     # AR - the tractor narrow/medium-band flux is: tractor_flux = igm * (cont + lya)
-    # AR so the rest-frame EW is: (tractor_flux / my_cont - 1)/ (1 + z)
+    # AR
+    # AR [deprecated] so the rest-frame EW is: (tractor_flux / my_cont - 1)/ (1 + z)
+    # AR
+    # AR following discussion with Arjun:
+    # AR    EW = (tractor_flux - mycont) / PL_noIGM(w_lya) / (1 + z)
+    # AR ie do not fold in the IGM in the denominator
+    # AR remark, units:
+    # AR - tractor_flux and mycont: erg/s/cm2/A
+    # AR - PL_noIGM(w_lya): erg/s/cm2/A
+    # AR - filt_width: A
+    # AR - hence EW correctly is in [A]
+    # AR
     # AR the relevant band is picked as follows:
     # AR - first restrict to not-broad-bands overlapping the lya
     # AR - then pick the one where the weff is the closest to the lya line
@@ -654,12 +665,12 @@ def get_continuum_params_indiv(s, p, z, phot_bands):
             specliteindx = np.array([_ for _ in range(len(all_filts.names)) if all_filts.names[_] == filtname])
             specliteindx_z = (specliteindx, np.array([z]))
             phot_cont = get_powerlaw_filtfs(specliteindx_z, coeff, beta)[0]
-            band_widths = np.array([wmax - wmin for wmin, wmax in zip(wmins[jj], wmaxs[jj])])
+            filt_ws = all_filts[specliteindx[0]].wavelength
+            filt_rs = all_filts[specliteindx[0]].response
+            filt_width = np.trapz(filt_rs, x=filt_ws) / filt_rs.max() # AR effective width
             ew_band = phot_bands[j]
-            #ew = (wmaxs[j] - wmins[j]) * (phot_cont_and_lya / phot_cont - 1.) / (1. + z)
-            ew = 10 * (1+z) * (phot_cont_and_lya / phot_cont - 1.) / (1. + z)
-            # print("{}\t{:.2f}\t{}\t{:.2f}\t{:.2f}\t{:.2f}".format(p["TARGETID"], z, ew_band, phot_cont, phot_cont_and_lya, ew))
-
+            phot_cont_atlya_noigm = get_cont_powerlaw((1 + z) * wave_lya, None, coeff, beta)
+            ew = filt_width * (phot_cont_and_lya - phot_cont) / phot_cont_atlya_noigm / (1. + z)
 
     return coeff, beta, rchi2, weffs, wmins, wmaxs, islyas, phot_fs, phot_ivs, phot_cont, phot_cont_and_lya, ew, ew_band
 
