@@ -33,9 +33,9 @@ allowed_imgs = ["odin", "suprime", "clauds", "hscwide", "ibis"]
 allowed_img_cases = {
     "odin": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2"],
     "suprime": ["cosmos_yr2", "cosmos_yr3"],
-    "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3"],
+    "clauds": ["cosmos_yr1", "xmmlss_yr2", "cosmos_yr2", "cosmos_yr3", "cosmos_yr4"],
     "hscwide": ["cosmos_yr3"],
-    "ibis": ["xmmlss_yr4"]
+    "ibis": ["xmmlss_yr4", "cosmos_yr4"]
 }
 allowed_cases = []
 for img in allowed_img_cases:
@@ -165,6 +165,7 @@ def get_bb_img(fn):
         "Subaru_tractor_forced_all-redux-20231025.fits",
         "cosmos-spring2024-hscwide-data.fits",
         "ibis-xmm-ar-djs-he.fits",
+        "ibis4-cosmos-m490-targets-wide.fits",
     ]:
 
         bb_img = "HSC"
@@ -180,6 +181,7 @@ def get_bb_img(fn):
 
     elif os.path.basename(fn) in [
         "ibis3-xmm-forced-hsc-wide.fits",
+        "ibis4-cosmos-forced-hsc-wide.fits",
     ]:
 
         bb_img = "HSC"
@@ -221,10 +223,14 @@ def get_specprod(case):
     """
     assert case in allowed_cases
 
-    # TODO: update
+    # TODO: update for 50 zeros for tertiary47!
     if case in ["xmmlss_yr4"]:
 
         specprod = "daily"
+
+    elif case in ["cosmos_yr4"]:
+
+        specprod = "cosmos_83577_50bias"
 
     else:
 
@@ -296,6 +302,10 @@ def get_specdirs(img, case):
 
             casedirs = ["tertiary37-thru20240309-loa"]
 
+        if case == "cosmos_yr4":
+
+            casedirs = ["tertiary47-thru20250430"]
+
     if img == "hscwide":
 
         if case == "cosmos_yr3":
@@ -308,6 +318,10 @@ def get_specdirs(img, case):
 
             # TODO: update
             casedirs = ["tertiary44-thru20241230"]
+
+        if case == "cosmos_yr4":
+
+            casedirs = ["tertiary47-thru20250430"]
 
     specdirs = [
         os.path.join(spec_rootdir, specprod, "healpix", casedir) for casedir in casedirs
@@ -843,6 +857,8 @@ def get_img_infos(img, case, stdsky):
                 mydict = get_clauds_cosmos_yr2_infos()
             if case == "cosmos_yr3":
                 mydict = get_clauds_cosmos_yr3_infos()
+            if case == "cosmos_yr4":
+                mydict = get_clauds_cosmos_yr4_infos()
 
         if img == "hscwide":
 
@@ -857,10 +873,13 @@ def get_img_infos(img, case, stdsky):
 
             from desihiz.hizmerge_ibis import (
                 get_ibis_xmmlss_yr4_infos,
+                get_ibis_cosmos_yr4_infos,
             )
 
             if case == "xmmlss_yr4":
                 mydict = get_ibis_xmmlss_yr4_infos()
+            if case == "cosmos_yr4":
+                mydict = get_ibis_cosmos_yr4_infos()
 
     bands = get_img_bands(img)
     for band in bands:
@@ -1073,14 +1092,24 @@ def read_targfn(targfn):
     # IBIS
     if basename in [
         "ibis3-xmm-forced-hsc-wide.fits",
+        "ibis4-cosmos-forced-hsc-wide.fits",
     ]:
 
-        if basename == "ibis3-xmm-forced-hsc-wide.fits":
+        if basename in [
+            "ibis3-xmm-forced-hsc-wide.fits",
+            "ibis4-cosmos-forced-hsc-wide.fits",
+        ]:
 
             from desihiz.hizmerge_ibis import (
                 swap_maskbits,
                 add_synthg
             )
+
+            # hsc bands
+            if basename == "ibis3-xmm-forced-hsc-wide.fits":
+                hsc_bands = ["G", "R", "I", "Z", "Y"]
+            if basename == "ibis4-cosmos-forced-hsc-wide.fits":
+                hsc_bands = ["G", "R2", "I2", "Z", "Y"]
 
             # remove a handful of duplicates...
             p["UNQID"] = ["{}-{}".format(b, o) for b, o in zip(p["BRICKNAME"], p["OBJID"])]
@@ -1089,7 +1118,8 @@ def read_targfn(targfn):
             p = p[ii]
 
             # swap maskbits
-            p = swap_maskbits(p)
+            if basename == "ibis3-xmm-forced-hsc-wide.fits":
+                p = swap_maskbits(p)
 
             # add ad synthetic g-flux
             p = add_synthg(p)
@@ -1099,7 +1129,7 @@ def read_targfn(targfn):
             new_roots = ["FLUX", "PSFDEPTH", "GALDEPTH"]
 
             black_keys = []
-            for band in get_img_bands("ibis") + ["G", "R", "I", "Z", "Y"]:
+            for band in get_img_bands("ibis") + hsc_bands:
                 # AR fake added band for selections
                 if band == "M541":
                     continue
@@ -1109,6 +1139,9 @@ def read_targfn(targfn):
                         black_keys.append(key)
                         #log.info("remove (a posteriori added) column: {}".format(key))
             black_keys += ["CLAUDS", "CLAUDS_ID", "CLAUDS_ZPHOT"]
+            if basename == "ibis4-cosmos-forced-hsc-wide.fits":
+                black_keys += ["COSMOS2020", "COSMOS2020_ID", "COSMOS2020_ZPHOT"]
+                black_keys += [key for key in p.colnames if key[:4] == "DESI"]
             log.info("remove (a posteriori added) columns: {}".format(",".join(black_keys)))
             p.remove_columns(black_keys)
 
@@ -1680,6 +1713,10 @@ def get_phot_fns(img, case, band, photdir=None, v2=None):
             mydict["xmmlss_yr4_{}".format(tmpband)] = [
                 os.path.join(photdir, "ibis3-xmm-forced-hsc-wide.fits")
             ]
+        tmpband = "M490"
+        mydict["cosmos_yr4_M490".format(tmpband)] = [
+                os.path.join(photdir, "ibis4-cosmos-forced-hsc-wide.fits")
+        ]
 
     if "{}_{}".format(case, band) in mydict:
 
@@ -1774,7 +1811,7 @@ def get_phot_init_table(img, n):
 
         # ls-{dr9.1.1,dr10} or hsc fluxes
         if img == "ibis":
-            bb_bands = ["G", "R", "I", "Z", "Y"]
+            bb_bands = ["G", "R", "R2", "I", "I2", "Z", "Y"]
         else:
             bb_bands = ["G", "R", "R2", "I", "I2", "Z"]
         for band in bb_bands:
@@ -2173,7 +2210,10 @@ def get_phot_table(img, case, specinfo_table, photdir, v2=False):
 
                 tmpbands = [_ for _ in bands if _ != "M541"] + ["SYNTHG"]
                 prefixes = ["NEA", "FLUX", "FLUX_IVAR", "FIBERFLUX", "PSFDEPTH", "GALDEPTH"]
-                bb_bands = ["G", "R", "I", "Z", "Y"]
+                if case == "xmmlss_yr4":
+                    bb_bands = ["G", "R", "I", "Z", "Y"]
+                if case == "cosmos_yr4":
+                    bb_bands = ["G", "R2", "I2", "Z", "Y"]
 
             else:
 

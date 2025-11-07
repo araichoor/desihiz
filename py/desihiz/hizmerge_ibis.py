@@ -266,6 +266,106 @@ def get_ibis_xmmlss_yr4_infos():
     return mydict
 
 
+def get_ibis_cosmos_yr4_infos():
+    """
+    Get the minimal photometric infos for IBIS targets from tertiary47
+
+    Args:
+        None
+
+    Returns:
+        mydict: dictionary with {keys: arrays},
+            with keys: TARGETID, TERTIARY_TARGET, PHOT_RA, PHOT_DEC, PHOT_SELECTION
+    """
+    #
+    fadir = os.path.join(
+        os.getenv("DESI_ROOT"), "survey", "fiberassign", "special", "tertiary", "0047"
+    )
+    bands = get_img_bands("ibis")
+
+    # first read the tertiary47 file
+    fn = os.path.join(fadir, "tertiary-targets-0047-assign.fits")
+    d = Table.read(fn)
+
+    # cut on ibis targets
+    sel = d["IBIS"].copy()
+    d = d[sel]
+
+    # get the row in the target file
+    rows = d["IBIS_ROW"].copy()
+
+    # now read targets file
+    fn = os.path.join(fadir, "inputcats", "ibis4-cosmos-m490-targets-wide.fits")
+    t = Table.read(fn)
+
+    # match t to d
+    t = t[rows]
+
+    # sanity check:
+    # - IBIS targets are bottom-priority, so there can be some differences
+    dcs = SkyCoord(d["RA"] * units.degree, d["DEC"] * units.degree, frame="icrs")
+    tcs = SkyCoord(t["RA"] * units.degree, t["DEC"] * units.degree, frame="icrs")
+    seps = dcs.separation(tcs).to("arcsec").value
+    sel = (d["LBG_LSSTY4"]) | (d["DWARF_GAL_P1"]) | (d["DWARF_GAL_P2"])
+    assert np.all(seps[sel] < 1.)
+    assert np.all(seps[~sel] == 0.)
+
+    # initialize (with grabbing correct datamodel)
+    tmpdict = get_init_infos("ibis", [len(t), 0, 0, 0, 0, 0])[bands[0]]
+
+    for key in ["PHOT_RA", "PHOT_DEC", "PHOT_SELECTION"]:
+
+        d[key] = tmpdict[key]
+
+    # get ibis_ra, ibis_dec
+    d["PHOT_RA"], d["PHOT_DEC"] = t["RA"], t["DEC"]
+
+    # get band + selection
+    # all tertiary47 IBIS are M490
+    unqids = np.array(["{}-{}".format(b, o) for b, o in zip(t["BRICKNAME"], t["OBJID"])])
+    d["PHOT_SELECTION"] = "M490_BROAD"
+    for band in bands:
+        if band == "M490":
+            d[band] = True
+        else:
+            d[band] = False
+
+    # sanity check
+    ## all rows are filled
+    assert np.all(d["TERTIARY_TARGET"] != 0)
+    assert np.all(d["PHOT_RA"] != 0)
+    assert np.all(d["PHOT_DEC"] != 0)
+
+    #
+    mydict = get_init_infos("ibis", [d[band].sum() for band in bands])
+
+    for band in bands:
+
+        sel = d[band]
+        mydict[band]["TARGETID"] = d["TARGETID"][sel]
+        mydict[band]["TERTIARY_TARGET"] = d["TERTIARY_TARGET"][sel]
+        mydict[band]["PHOT_RA"] = d["RA"][sel]
+        mydict[band]["PHOT_DEC"] = d["DEC"][sel]
+        mydict[band]["PHOT_SELECTION"] = d["PHOT_SELECTION"][sel].astype(
+            mydict[band]["PHOT_SELECTION"].dtype
+        )
+
+    ## check
+    for band in bands:
+
+        names, counts = np.unique(d["TERTIARY_TARGET"][d[band]], return_counts=True)
+        log.info(
+            "{} ({}):\t{}".format(
+                band,
+                d[band].sum(),
+                ", ".join(
+                    ["{}={}".format(name, count) for name, count in zip(names, counts)]
+                ),
+            )
+        )
+    return mydict
+
+
 # get photometry infos (targetid, brickname, objid)
 # this is for ibis targets only
 # sky/std will have dummy values

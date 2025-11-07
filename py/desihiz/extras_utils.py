@@ -63,9 +63,10 @@ def get_rrfn(cofn, rrsubdir):
 def read_rrfn(rrfn):
 
     start = time()
-    nbest = 9
+    #nbest = 9
     d = Table.read(rrfn, "REDSHIFTS")
     _, zfit = read_zscan(rrfn.replace("redrock", "rrdetails").replace(".fits", ".h5"))
+    nbest = 1 + zfit["znum"].max()
     assert len(zfit) == nbest * len(d)
     assert np.all(zfit["targetid"][::nbest] == d["TARGETID"])
     for key in ["Z", "SPECTYPE", "DELTACHI2"]:
