@@ -236,7 +236,7 @@ def write_per_step_files(d, cameras, survey, program, myfs, my_spectro_redux, my
         )
         custom_write(myfs, myfns["qsomgii"], "qsomgii", cmd, overwrite)
         # ====================== qso_qn ===========================================
-        cmd = "srun -N 1 -n 1 -c 32 desi_qso_qn_afterburner --coadd {} --redrock {} --output {} --target_selection all_targets --save_target all &> {}\n".format(
+        cmd = "srun -N 1 -n 1 -c 32 desi_qso_qn_afterburner --coadd {} --redrock {} --output {} --target_selection all --save_target all &> {}\n".format(
             myfns["coadd"], myfns["redrock"], myfns["qsoqn"], myfns["qsoqnlog"],
         )
         custom_write(myfs, myfns["qsoqn"], "qsoqn", cmd, overwrite)
