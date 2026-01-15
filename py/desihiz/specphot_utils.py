@@ -11,7 +11,7 @@ from speclite import filters as speclite_filters
 
 def get_opt_waves():
 
-    return np.arange(3500, 10001, dtype=float)
+    return np.arange(3000, 10001, dtype=float)
 
 
 def get_filt_fns():
@@ -80,6 +80,12 @@ def get_filts(norm=True):
     for instband in mydict:
         fn = mydict[instband]
         d = Table.read(fn, format="ascii.commented_header")
+
+        # odin passbands are in nm...
+        if instband.split("_")[1] in ["N419", "N501", "N673"]:
+
+            d["WAVE"] *= 10.
+
         filts[instband] = {}
         filts[instband]["WAVE"] = waves
         filts[instband]["RESP"] = np.interp(
@@ -110,15 +116,16 @@ def get_speclite_filt(ws, ts):
     return speclite_filt
 
 
-# instands : list of {instrument_band}, e.g. "CFHT_U"
-# bands : corresponding list of band names for the output dictionary
-def get_speclite_filts(instbands, bands):
+# instands : list of {instrument_band}, e.g. "MEGACAM_U"
+def get_speclite_filts(instbands):
 
     filts = get_filts()
-    specilte_filts = {}
-    for instband, band in zip(instbands, bands):
-        ws, ts = filts["WAVE"], filts["RESP"]
-        speclite_filts[band] = get_speclite_filt(ws, ts)
+    speclite_filts = {}
+
+    for instband in instbands:
+
+        ws, ts = filts[instband]["WAVE"], filts[instband]["RESP"]
+        speclite_filts[instband] = get_speclite_filt(ws, ts)
 
     return speclite_filts
 
